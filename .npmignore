@@ -1,0 +1,10 @@
+# 依赖
+node_modules
+/*
+!/dist
+!/yarn
+!/lib
+!/package.json
+!/README_COMMAND.md
+!/README.md
+!/LICENSE

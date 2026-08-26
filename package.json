@@ -1,0 +1,111 @@
+{
+  "name": "alemonjs-load-gscore",
+  "version": "0.1.0",
+  "description": "在 AlemonJS 中托管并桥接 GsCore 插件生态",
+  "author": "alemonjs",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package": "./package.json"
+  },
+  "alemonjs": {
+    "config": [
+      {
+        "name": "runtime_mode",
+        "type": "string",
+        "required": false,
+        "description": "运行时模式：local（插件托管，默认）、external 或 docker"
+      },
+      {
+        "name": "gscore_url",
+        "type": "string",
+        "required": false,
+        "description": "GsCore HTTP 地址"
+      },
+      {
+        "name": "gscore_repo",
+        "type": "string",
+        "required": false,
+        "description": "GsCore Git 仓库地址（local 模式）"
+      },
+      {
+        "name": "bot_id",
+        "type": "string",
+        "required": false,
+        "description": "GsCore 适配器标识"
+      },
+      {
+        "name": "ws_token",
+        "type": "string",
+        "required": false,
+        "description": "GsCore WsToken（仅 WebSocket 模式预留）"
+      },
+      {
+        "name": "api_token",
+        "type": "string",
+        "required": false,
+        "description": "管理 API 的 x-gscore-token；未配置时禁用写操作 API"
+      },
+      {
+        "name": "gscore_dir",
+        "type": "string",
+        "required": false,
+        "description": "GsCore 数据根目录名"
+      },
+      {
+        "name": "python_command",
+        "type": "string",
+        "required": false,
+        "description": "Python 命令（local 模式备用）"
+      },
+      {
+        "name": "auto_start",
+        "type": "boolean",
+        "required": false,
+        "description": "AlemonJS 启动时自动启动 GsCore"
+      },
+      {
+        "name": "startup_timeout",
+        "type": "number",
+        "required": false,
+        "description": "GsCore 启动等待超时时间（毫秒）"
+      },
+      {
+        "name": "docker_image",
+        "type": "string",
+        "required": false,
+        "description": "GsCore Docker 镜像"
+      }
+    ],
+    "web": {
+      "config": { "serverPort": true },
+      "root": "dist"
+    }
+  },
+  "scripts": {
+    "app": "node index.js",
+    "build": "yarn --cwd frontend build && lvy build",
+    "install:frontend": "yarn --cwd frontend install",
+    "build:runtime": "lvy build",
+    "build:frontend": "yarn --cwd frontend build",
+    "dev": "lvy app.ts --serverPort 17188",
+    "lint": "eslint src --ext .ts --max-warnings=0",
+    "test": "yarn build && node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "koa-bodyparser": "^4.4.1",
+    "koa-router": "^14.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/koa-bodyparser": "^4.3.13",
+    "@types/koa-router": "^7.4.9",
+    "alemonjs": "^2.1.96",
+    "eslint": "^9.18.0",
+    "lvyjs": "0.3.0-alpha.5",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-eslint": "^8.19.1"
+  },
+  "packageManager": "yarn@1.22.22"
+}
