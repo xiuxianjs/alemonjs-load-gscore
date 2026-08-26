@@ -1,8 +1,0 @@
-node_modules
-lib
-dist
-logs
-runtime
-*.log
-.env
-/GsCore
