@@ -34,3 +34,12 @@ test('converts supported media types and ignores unsupported media', () => {
     { type: 'file', data: { type: 'url', content: 'https://example.com/a.zip' } }
   ])
 })
+
+test('preserves AlemonJS channel id for GsCore channel replies', () => {
+  const result = toMessageReceive({
+    GuildId: 'guild-1', ChannelId: 'channel-9', UserId: 'user-1', MessageText: '你好'
+  }, 'AlemonJS')
+
+  assert.equal(result.user_type, 'group')
+  assert.equal(result.group_id, 'channel-9')
+})

@@ -5,3 +5,4 @@ logs
 runtime
 *.log
 .env
+/GsCore

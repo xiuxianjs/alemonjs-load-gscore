@@ -31,8 +31,11 @@ export function toMessageReceive(event: AlemonEvent, botID: string): MessageRece
     bot_id: botID,
     bot_self_id: String(event.BotId ?? ''),
     msg_id: String(event.MessageId ?? ''),
-    user_type: event.GuildId || event.ChannelId ? 'group' : 'direct',
-    group_id: String(event.GuildId ?? event.ChannelId ?? ''),
+    // 频道事件通常同时带 GuildId 和 ChannelId。GsCore 当前命令权限筛选
+    // 主要放行 group/direct，因此用 group 保证插件能执行，同时把 ChannelId
+    // 放入 group_id，桥接层会将回复交给 AlemonJS 的 sendToChannel。
+    user_type: event.ChannelId || event.GuildId ? 'group' : 'direct',
+    group_id: String(event.ChannelId ?? event.GuildId ?? ''),
     user_id: String(event.UserId ?? ''),
     user_pm: event.IsMaster ? 1 : 6,
     content,

@@ -293,6 +293,9 @@ export class GSCoreManager {
       return
     }
     if (!this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
+    if (await this.refresh(true)) {
+      throw new Error('GsCore 已在配置地址运行，当前进程不是本插件启动的；请勿重复启动，或先切换为 external 模式')
+    }
     this.ensureDirectories()
     const { command, args } = await this.localCommand()
     this.localStopRequested = false
@@ -344,6 +347,7 @@ export class GSCoreManager {
     this.localStopRequested = true
     const child = this.localProcess
     if (!child || child.killed) {
+      if (await this.refresh(true)) throw new Error('当前 GsCore 不是本插件启动的进程，无法安全停止；请在原托管进程中停止，或切换为 external 模式')
       this.localProcess = null
       this.reachable = false
       return
@@ -403,9 +407,9 @@ export class GSCoreManager {
     // external 模式的“安装”由外部部署负责，服务暂时离线不代表未安装。
     const installed = mode === 'local' ? this.localInstalled() : mode === 'external' ? true : await this.containerExists()
     const processRunning = mode === 'local'
-      ? Boolean(this.localProcess && !this.localProcess.killed && this.localProcess.exitCode === null && this.localProcess.signalCode === null)
+      ? Boolean(this.localProcess && !this.localProcess.killed && this.localProcess.exitCode === null && this.localProcess.signalCode === null) || running
       : running
-    const ready = mode === 'local' ? processRunning && running : running
+    const ready = running
     const plugins = (mode === 'local' || mode === 'docker') && existsSync(getPluginsDir())
       ? readdirSync(getPluginsDir(), { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort()
       : []

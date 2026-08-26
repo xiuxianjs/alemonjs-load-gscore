@@ -13,6 +13,7 @@ function append(format: InstanceType<typeof Format>, item: GSCoreMessage): void 
     format.addImage(typeof image === 'string' ? image : String(image?.content ?? ''))
   } else if (item.type === 'record') format.addAudio(String(item.data ?? ''))
   else if (item.type === 'video') format.addVideo(String(item.data ?? ''))
+  else if (item.type === 'file') format.addText(`[文件] ${String((item.data as { content?: string } | string)?.content ?? item.data ?? '')}`)
   else if (item.type === 'node' && Array.isArray(item.data)) {
     for (const child of item.data as GSCoreMessage[]) append(format, child)
   } else if (item.type.startsWith('log_')) {
@@ -34,11 +35,12 @@ async function deliver(event: Parameters<typeof useMessage>[0], reply: MessageSe
   const format = toFormat(reply.content ?? [])
   if (!format.value.length) return
   const targetID = String(reply.target_id ?? '')
-  if (reply.target_type === 'direct' && targetID) {
+  const targetType = String(reply.target_type ?? '')
+  if ((targetType === 'direct' || targetType === 'private') && targetID) {
     await sendToUser(targetID, format.value)
     return
   }
-  if (targetID && reply.target_type) {
+  if (targetID && targetType) {
     await sendToChannel(targetID, format.value)
     return
   }
@@ -48,10 +50,11 @@ async function deliver(event: Parameters<typeof useMessage>[0], reply: MessageSe
 
 export default async (event: Parameters<typeof useMessage>[0], next: Next) => {
   if (!manager.isReady) {
-    // 外部服务可能在 AlemonJS 之后启动；借助请求去重避免每条消息产生并发探测。
-    void manager.refresh()
-    next()
-    return
+    // 外部服务可能在 AlemonJS 之后启动；先等待一次探测，避免把服务刚启动后的第一条消息直接丢弃。
+    if (!(await manager.refresh(true))) {
+      next()
+      return
+    }
   }
   try {
     const reply = await manager.send(toMessageReceive(event, getBotID()))

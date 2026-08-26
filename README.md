@@ -27,7 +27,7 @@ GsCore 必须开启 `ENABLE_HTTP=true`，因为桥接调用其 `/api/send_msg` �
 
 启用 HTTP 时插件会同时确保 `WS_TOKEN` 存在，并在桥接请求中自动携带 `X-WS-Token`；也可以在插件配置中预先设置 `ws_token`。因此不需要关闭 GsCore 的接口鉴权。
 
-首次使用 local 模式需要宿主机具备 Git 和 Python 3.11+。如果存在 `uv`、`poetry` 或 `pdm`，插件会优先使用它们；否则会自动筛选可用的 Python 3.11+，在 `<gscore_dir>/.venv` 创建独立虚拟环境并安装 GsCore 项目，不污染系统 Python。安装后源码位于 `<gscore_dir>/core`，GsCore 数据和插件使用其实际的 `<gscore_dir>/core/data`、`<gscore_dir>/core/gsuid_core/plugins`，插件日志位于 `<gscore_dir>/logs`。插件退出时会结束它拉起的本地 GsCore 子进程。
+首次使用 local 模式需要宿主机具备 Git、Python 3.11+ 和至少 512MB 可用磁盘空间。安装前插件会检查仓库地址、Git、Python、磁盘空间以及目标目录，避免在不完整目录上继续安装。如果存在 `uv`、`poetry` 或 `pdm`，插件会优先使用它们；否则会自动筛选可用的 Python 3.11+，在 `<gscore_dir>/.venv` 创建独立虚拟环境并安装 GsCore 项目，不污染系统 Python。安装后源码位于 `<gscore_dir>/core`，GsCore 数据和插件使用其实际的 `<gscore_dir>/core/data`、`<gscore_dir>/core/gsuid_core/plugins`，插件日志位于 `<gscore_dir>/logs`。插件退出时会结束它拉起的本地 GsCore 子进程。启动前会先探测配置地址，已有 GsCore 运行时不会重复拉起第二个进程。
 
 已有旧版本如果原本连接外部 GsCore，请显式设置 `runtime_mode: external` 保持原行为；要迁移到插件托管，设置为 `local` 后使用面板或 `#gs 安装`。迁移不会自动删除旧的外部服务，也不会覆盖已有 `gscore_dir` 数据。
 
@@ -52,7 +52,7 @@ Docker 托管仍作为可选兼容模式保留，可使用 `#gs 安装` 创建�
 - `POST /api/gscore/action`：执行管理操作。默认不限制本机前端请求；如果配置了
   `api_token`，则必须提供匹配的 `x-gscore-token` 请求头。
 
-状态响应还会返回当前管理任务（`busy`、`busyTask`）和最近一次管理错误（`lastError`），便于面板展示和排障。
+管理操作通过后台任务执行，前端会轮询状态直到完成；状态响应会返回当前管理任务的 `task.phase`、任务结果和最近一次错误。AlemonJS 重启后，未完成任务会标记为 `interrupted`，避免误报为成功。`busy` 和 `busyTask` 仍保留用于兼容旧面板。消息桥接在 GsCore 尚未探测就绪时会先等待一次探测，不会直接丢弃刚启动后的第一条消息。
 Docker 模式下，`installed` 以实际容器是否存在为准，不会因为仅创建了数据目录而误报已安装。
 
 ## 前端面板
@@ -61,6 +61,6 @@ Docker 模式下，`installed` 以实际容器是否存在为准，不会因为�
 
 前端依赖固定使用 React 19.2.8，因为 `@alemonjs/react-ui@0.0.8` 的运行时组件依赖 React 19。升级或切换依赖后若仍看到 `recentlyCreatedOwnerStacks`，请删除 `frontend/node_modules` 后重新执行 `yarn install:frontend`。
 
-external 模式的面板提供连接状态、服务地址、控制台跳转、自动刷新和 API Token 保存。GsCore 的启动、停止和插件维护仍需在外部 GsCore 环境完成。
+面板的“管理”页负责运行控制，“配置”页负责 GsCore 配置和 API Token，“日志”页负责日志查看，“控制台”页嵌入 GsCore 原生控制台。默认不限制管理 API；如果面板可被局域网或公网访问，建议配置 `api_token`。external 模式下 GsCore 的启动、停止和插件维护仍需在外部 GsCore 环境完成。
 
 复制时带来的 Yunzai 专用前端已移除，避免它继续调用已不存在的 Yunzai API。

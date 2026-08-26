@@ -1,5 +1,5 @@
 import {useEffect, useState} from "react";
-import {getApiToken, getConfig, saveConfig, setApiToken} from "../api/web-api";
+import {getApiToken, getConfig, getStatus, saveConfig, setApiToken} from "../api/web-api";
 
 export default function Config() {
   const [token, setToken] = useState(getApiToken());
@@ -7,6 +7,7 @@ export default function Config() {
   const [registerCode, setRegisterCode] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState("");
+  const [authEnabled, setAuthEnabled] = useState(false);
   const applyConfig = (config: Record<string, unknown>) => {
     setText(JSON.stringify(config, null, 2));
     setRegisterCode(typeof config.REGISTER_CODE === "string" ? config.REGISTER_CODE : "");
@@ -53,6 +54,9 @@ export default function Config() {
     return () => {
       disposed = true;
     };
+  }, []);
+  useEffect(() => {
+    void getStatus().then(status => setAuthEnabled(status.managementAuthEnabled)).catch(() => undefined);
   }, []);
   const run = async (kind: "load" | "save") => {
     setLoading(kind);
@@ -110,6 +114,7 @@ export default function Config() {
       </section>
       <section className="card token">
         <h2>管理 API Token</h2>
+        <p className="muted">{authEnabled ? "已启用 Token 校验。" : "默认不限制管理 API；如果面板会被其他设备访问，建议配置 Token。"}</p>
         <input
           type="password"
           value={token}

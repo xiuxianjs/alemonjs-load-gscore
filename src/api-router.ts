@@ -4,6 +4,7 @@ import { backgroundActions, runGSCoreAction, runGSCoreActionInBackground } from 
 import { isGSCoreAction } from './gscore/actions'
 import { getApiToken } from './path'
 import { getGSCoreURL } from './path'
+import { manager } from './gscore/manager'
 
 const apiRouter = new KoaRouter({ prefix: '/api/gscore' })
 apiRouter.use(bodyParser())
@@ -92,6 +93,11 @@ apiRouter.post('/config', async ctx => {
     return
   }
   try {
+    if (manager.isBusy) {
+      ctx.status = 409
+      ctx.body = { code: 409, message: `正在${manager.busyTask}，请等待完成`, data: null }
+      return
+    }
     const body = (ctx.request as { body?: Record<string, unknown> }).body ?? {}
     runGSCoreActionInBackground('save-config', { config: body.config })
     ctx.status = 202
@@ -117,6 +123,11 @@ apiRouter.post('/action', async ctx => {
     return
   }
   try {
+    if (manager.isBusy) {
+      ctx.status = 409
+      ctx.body = { code: 409, message: `正在${manager.busyTask}，请等待完成`, data: null }
+      return
+    }
     if (backgroundActions.includes(action)) {
       runGSCoreActionInBackground(action, body)
       ctx.status = 202
