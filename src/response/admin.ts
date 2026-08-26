@@ -1,5 +1,6 @@
 import { Format, useEvent, useMessage } from 'alemonjs'
-import { runGSCoreAction, type GSCoreAction } from '../gscore/control'
+import { backgroundActions, runGSCoreAction, runGSCoreActionInBackground, type GSCoreAction } from '../gscore/control'
+import { manager } from '../gscore/manager'
 
 const help = [
   '#gs 状态', '#gs 安装', '#gs 启动 / 停止 / 重启', '#gs 日志', '#gs 启用http',
@@ -41,6 +42,12 @@ export default async () => {
   }
 
   try {
+    if (backgroundActions.includes(action)) {
+      if (manager.isBusy) throw new Error(`正在${manager.busyTask}，请等待完成`)
+      runGSCoreActionInBackground(action, payload)
+      await reply(`GsCore：已提交“${command || action}”任务，请稍后使用 #gs 状态或前端查看进度。`)
+      return
+    }
     const status = await runGSCoreAction(action, payload)
     await reply(action === 'logs' ? 'GsCore：日志已准备，可通过前端查看' : `GsCore：${status.message}`)
   } catch (error) {

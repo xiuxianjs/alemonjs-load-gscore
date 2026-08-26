@@ -15,6 +15,7 @@ type GSCoreConfig = {
   python_command?: string
   auto_start?: boolean
   startup_timeout?: number
+  message_timeout?: number
 }
 
 const defaultURL = 'http://127.0.0.1:8765'
@@ -85,6 +86,11 @@ export function getAutoStart(): boolean {
 export function getStartupTimeout(): number {
   const value = Number(getConfig().startup_timeout ?? 60_000)
   return Number.isFinite(value) ? Math.min(300_000, Math.max(10_000, Math.floor(value))) : 60_000
+}
+
+export function getMessageTimeout(): number {
+  const value = Number(getConfig().message_timeout ?? 30_000)
+  return Number.isFinite(value) ? Math.min(120_000, Math.max(5_000, Math.floor(value))) : 30_000
 }
 
 export function getDataDir(): string {

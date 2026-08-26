@@ -13,6 +13,8 @@ export type GSCoreStatus = {
   plugins: string[]
   message: string
   managementAuthEnabled: boolean
+  processOwner: 'plugin' | 'external' | 'none'
+  restartRequired: boolean
   task: {
     id: string
     action: string

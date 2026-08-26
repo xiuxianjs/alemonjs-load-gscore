@@ -27,7 +27,8 @@ export default function Manage() {
 
   const connected = status?.ready === true
   const localMode = status?.mode === 'local'
-  const disabled = Boolean(action) || !localMode
+  const externalProcess = status?.processOwner === 'external'
+  const disabled = Boolean(action) || !localMode || externalProcess
   const statusLabel = !status ? '读取中' : status.busy ? '处理中' : status.running ? '运行中' : status.installed ? '已停止' : '未安装'
 
   return <div className="manage page-body">
@@ -38,9 +39,10 @@ export default function Manage() {
       <span className={`badge status-badge ${connected ? 'status-online' : status?.installed ? 'status-idle' : 'status-offline'}`}>{statusLabel}</span>
     </section>
     {!status && <div className="loading-strip"><span className="spinner" />正在读取 GsCore 状态…</div>}
+    {externalProcess && <div className="notice">当前 GsCore 由外部进程运行，不是本插件拉起。为避免误停止，面板不会执行启动、停止、重启或自动应用配置；请在原运行环境中管理它，或停止该进程后再由插件启动。</div>}
     <section className="card action-panel">
       <div className="section-title"><div><h2>服务操作</h2></div><div className="action-row top-actions"><button className="button" onClick={() => void refresh()} disabled={refreshing}>{refreshing ? '刷新中…' : '刷新状态'}</button><button className="button primary" disabled={disabled || Boolean(status?.installed)} onClick={() => void execute('install')}>安装 GsCore</button><button className="button" disabled={disabled || !status?.installed || status.running} onClick={() => void execute('start')}>启动</button><button className="button" disabled={disabled || !status?.running} onClick={() => void execute('stop')}>停止</button><button className="button" disabled={disabled || !status?.installed} onClick={() => void execute('restart')}>重启</button><button className="button subtle" disabled={disabled || !status?.installed} onClick={() => void execute('enable-http')}>启用 HTTP</button></div></div>
-      <p className="muted">{action ? `正在${action}…` : status?.busyTask ? `正在${status.busyTask}：${status.task?.phase ?? '处理中'}…` : `进程 PID：${status?.pid ?? '—'}；就绪：${status?.ready ? '是' : '否'}`}</p>
+      <p className="muted">{action ? `正在${action}…` : status?.busyTask ? `正在${status.busyTask}：${status.task?.phase ?? '处理中'}…` : `进程 PID：${status?.pid ?? '—'}；托管：${status?.processOwner === 'plugin' ? '本插件' : externalProcess ? '外部环境' : '—'}；就绪：${status?.ready ? '是' : '否'}`}</p>
     </section>
     {status?.task?.status === 'running' && <div className="loading-strip"><span className="spinner" />{status.task.action}：{status.task.phase}，请等待完成。</div>}
     {status?.task?.status === 'interrupted' && <div className="notice">上一次管理任务因 AlemonJS 重启而中断：{status.task.action}。请确认目录状态后重新执行。</div>}

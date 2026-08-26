@@ -21,13 +21,15 @@ alemonjs-load-gscore:
   gscore_dir: GsCore
   # AlemonJS 启动时自动启动已安装的本机 GsCore
   auto_start: true
+  # 等待 GsCore 命令处理并返回消息的最长时间（默认 30000）
+  message_timeout: 30000
 ```
 
 GsCore 必须开启 `ENABLE_HTTP=true`，因为桥接调用其 `/api/send_msg` 接口。local 模式下插件会安装并启动本机 GsCore；external 模式下 GsCore 的启动、停止和插件目录由外部部署负责。
 
 启用 HTTP 时插件会同时确保 `WS_TOKEN` 存在，并在桥接请求中自动携带 `X-WS-Token`；也可以在插件配置中预先设置 `ws_token`。因此不需要关闭 GsCore 的接口鉴权。
 
-首次使用 local 模式需要宿主机具备 Git、Python 3.11+ 和至少 512MB 可用磁盘空间。安装前插件会检查仓库地址、Git、Python、磁盘空间以及目标目录，避免在不完整目录上继续安装。如果存在 `uv`、`poetry` 或 `pdm`，插件会优先使用它们；否则会自动筛选可用的 Python 3.11+，在 `<gscore_dir>/.venv` 创建独立虚拟环境并安装 GsCore 项目，不污染系统 Python。安装后源码位于 `<gscore_dir>/core`，GsCore 数据和插件使用其实际的 `<gscore_dir>/core/data`、`<gscore_dir>/core/gsuid_core/plugins`，插件日志位于 `<gscore_dir>/logs`。插件退出时会结束它拉起的本地 GsCore 子进程。启动前会先探测配置地址，已有 GsCore 运行时不会重复拉起第二个进程。
+首次使用 local 模式需要宿主机具备 Git、Python 3.11+ 和至少 512MB 可用磁盘空间。安装前插件会检查仓库地址、Git、Python、磁盘空间以及目标目录，避免在不完整目录上继续安装。如果存在 `uv`、`poetry` 或 `pdm`，插件会优先使用它们；否则会自动筛选可用的 Python 3.11+，在 `<gscore_dir>/.venv` 创建独立虚拟环境并安装 GsCore 项目，不污染系统 Python。安装后源码位于 `<gscore_dir>/core`，GsCore 数据和插件使用其实际的 `<gscore_dir>/core/data`、`<gscore_dir>/core/gsuid_core/plugins`，插件日志位于 `<gscore_dir>/logs`。它是独立运行时：插件会持久化它拉起的本地进程 PID 与启动指纹，因此 AlemonJS 重启不会中断 GsCore，下次启动后仍能安全地继续停止、重启并应用配置；启动前也会先探测配置地址，已有外部 GsCore 运行时不会重复拉起第二个进程，更不会误停止它。
 
 已有旧版本如果原本连接外部 GsCore，请显式设置 `runtime_mode: external` 保持原行为；要迁移到插件托管，设置为 `local` 后使用面板或 `#gs 安装`。迁移不会自动删除旧的外部服务，也不会覆盖已有 `gscore_dir` 数据。
 
@@ -44,7 +46,7 @@ Docker 托管仍作为可选兼容模式保留，可使用 `#gs 安装` 创建�
 - `#gs 更新插件 <目录名>`
 - `#gs 删除插件 <目录名>`
 
-所有 `#gs` 管理指令仅主人可用。
+所有 `#gs` 管理指令仅主人可用。耗时操作会立即返回“已提交”，可用 `#gs 状态` 或前端查看进度。这个主人权限只保护本插件的管理入口；若 GsCore 内部插件还要求主人权限，仍需在 GsCore 的 `data/config.json` 中配置它的 `masters`，插件不会自动改写该授权名单。
 
 ## 管理 API
 
@@ -53,6 +55,8 @@ Docker 托管仍作为可选兼容模式保留，可使用 `#gs 安装` 创建�
   `api_token`，则必须提供匹配的 `x-gscore-token` 请求头。
 
 管理操作通过后台任务执行，前端会轮询状态直到完成；状态响应会返回当前管理任务的 `task.phase`、任务结果和最近一次错误。AlemonJS 重启后，未完成任务会标记为 `interrupted`，避免误报为成功。`busy` 和 `busyTask` 仍保留用于兼容旧面板。消息桥接在 GsCore 尚未探测就绪时会先等待一次探测，不会直接丢弃刚启动后的第一条消息。
+
+消息桥接默认等待 GsCore 最多 30 秒，覆盖 GsCore HTTP 模式的命令等待窗口。耗时更长的插件命令可通过 `message_timeout` 调整，范围为 5 至 120 秒。
 Docker 模式下，`installed` 以实际容器是否存在为准，不会因为仅创建了数据目录而误报已安装。
 
 ## 前端面板

@@ -18,6 +18,7 @@ import {
   getPythonCommand,
   getGSCoreVenvPython,
   getGSCoreVenvDir,
+  getMessageTimeout,
   getRuntimeMode,
   getApiToken,
   getStartupTimeout,
@@ -41,6 +42,13 @@ type Status = {
   message: string
   managementAuthEnabled: boolean
   task: TaskState | null
+  processOwner: 'plugin' | 'external' | 'none'
+  restartRequired: boolean
+}
+
+type ManagedProcessState = {
+  pid: number
+  fingerprint?: string
 }
 
 export type TaskState = {
@@ -71,11 +79,14 @@ function run(command: string, args: string[], options: { cwd?: string; timeout?:
   })
 }
 
-async function request(path: string, init?: RequestInit): Promise<Response> {
+async function request(path: string, init?: RequestInit, timeoutMs = 5_000): Promise<Response> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 5000)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     return await fetch(`${getGSCoreURL()}${path}`, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`GsCore 请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`)
+    throw error
   } finally {
     clearTimeout(timer)
   }
@@ -90,6 +101,7 @@ export class GSCoreManager {
   private refreshTask: Promise<boolean> | null = null
   private lastRefreshAt = 0
   private localProcess: ChildProcess | null = null
+  private managedProcess: ManagedProcessState | null = null
   private localLogFile: string | null = null
   private localStopRequested = false
   private localRestartCount = 0
@@ -97,10 +109,9 @@ export class GSCoreManager {
 
   constructor() {
     this.restoreTaskState()
-    // AlemonJS 退出时一并结束由插件拉起的本地进程，避免留下失控的 GsCore。
-    process.once('exit', () => {
-      if (this.localProcess && !this.localProcess.killed) this.localProcess.kill('SIGTERM')
-    })
+    this.restoreManagedProcessState()
+    // GsCore 是独立运行时。保留由本插件启动的服务，下一次 AlemonJS 启动会通过
+    // PID 与启动指纹恢复管理权；这样重启宿主不会中断机器人服务。
   }
 
   get isBusy(): boolean {
@@ -141,6 +152,71 @@ export class GSCoreManager {
   }
 
   private taskStatePath(): string { return join(getGSCoreDir(), '.management-task.json') }
+
+  private managedProcessPath(): string { return join(getGSCoreDir(), '.managed-process.json') }
+
+  private restoreManagedProcessState(): void {
+    try {
+      const state = JSON.parse(readFileSync(this.managedProcessPath(), 'utf8')) as ManagedProcessState
+      if (Number.isInteger(state?.pid) && state.pid > 0) this.managedProcess = state
+    } catch {
+      this.managedProcess = null
+    }
+  }
+
+  private async processFingerprint(pid: number): Promise<string | null> {
+    if (process.platform === 'win32') return null
+    try {
+      return (await run('ps', ['-p', String(pid), '-o', 'lstart=', '-o', 'command='], { timeout: 5_000 })).trim() || null
+    } catch {
+      return null
+    }
+  }
+
+  private async persistManagedProcess(pid: number): Promise<void> {
+    const fingerprint = await this.processFingerprint(pid)
+    const state: ManagedProcessState = fingerprint ? { pid, fingerprint } : { pid }
+    this.managedProcess = state
+    try {
+      mkdirSync(getGSCoreDir(), { recursive: true })
+      writeFileSync(this.managedProcessPath(), `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+    } catch (error) {
+      logger.warn(`[GsCore] 无法保存进程所有权状态：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  private clearManagedProcess(pid?: number): void {
+    if (pid && this.managedProcess?.pid !== pid) return
+    this.managedProcess = null
+    try {
+      if (existsSync(this.managedProcessPath())) rmSync(this.managedProcessPath(), { force: true })
+    } catch (error) {
+      logger.warn(`[GsCore] 无法清理进程所有权状态：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  private async managedLocalPID(): Promise<number | null> {
+    const child = this.localProcess
+    if (child?.pid && !child.killed && child.exitCode === null && child.signalCode === null) return child.pid
+    const state = this.managedProcess
+    if (!state) return null
+    try {
+      process.kill(state.pid, 0)
+    } catch {
+      this.clearManagedProcess(state.pid)
+      return null
+    }
+    const fingerprint = await this.processFingerprint(state.pid)
+    if (state.fingerprint && fingerprint !== state.fingerprint) {
+      this.clearManagedProcess(state.pid)
+      return null
+    }
+    if (fingerprint && !fingerprint.includes('gsuid_core.core')) {
+      this.clearManagedProcess(state.pid)
+      return null
+    }
+    return state.pid
+  }
 
   private persistTaskState(): void {
     if (!this.taskState) return
@@ -288,7 +364,7 @@ export class GSCoreManager {
   }
 
   private async startLocalProcess(): Promise<void> {
-    if (this.localProcess && !this.localProcess.killed) {
+    if (await this.managedLocalPID()) {
       await this.waitForReady()
       return
     }
@@ -312,6 +388,8 @@ export class GSCoreManager {
       stdio: ['ignore', 'pipe', 'pipe']
     })
     this.localProcess = child
+    if (!child.pid) throw new Error('无法获取 GsCore 子进程 PID')
+    await this.persistManagedProcess(child.pid)
     child.stdout?.on('data', chunk => this.appendLocalLog(chunk))
     child.stderr?.on('data', chunk => this.appendLocalLog(chunk))
     child.once('error', error => {
@@ -324,6 +402,7 @@ export class GSCoreManager {
         this.localProcess = null
         this.reachable = false
       }
+      if (child.pid) this.clearManagedProcess(child.pid)
       if (code !== 0 && signal !== 'SIGTERM') {
         logger.warn(`[GsCore] 本地进程已退出 code=${String(code)} signal=${String(signal)}`)
         if (!this.localStopRequested && getAutoStart() && this.localRestartCount < 3) {
@@ -347,6 +426,19 @@ export class GSCoreManager {
     this.localStopRequested = true
     const child = this.localProcess
     if (!child || child.killed) {
+      const pid = await this.managedLocalPID()
+      if (pid) {
+        try { process.kill(pid, 'SIGTERM') } catch { this.clearManagedProcess(pid); this.reachable = false; return }
+        const deadline = Date.now() + 10_000
+        while (Date.now() < deadline) {
+          try { process.kill(pid, 0) } catch { this.clearManagedProcess(pid); this.reachable = false; return }
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+        try { process.kill(pid, 'SIGKILL') } catch { /* 进程可能已在等待期间退出。 */ }
+        this.clearManagedProcess(pid)
+        this.reachable = false
+        return
+      }
       if (await this.refresh(true)) throw new Error('当前 GsCore 不是本插件启动的进程，无法安全停止；请在原托管进程中停止，或切换为 external 模式')
       this.localProcess = null
       this.reachable = false
@@ -365,6 +457,7 @@ export class GSCoreManager {
       child.kill('SIGTERM')
     })
     this.localProcess = null
+    if (child.pid) this.clearManagedProcess(child.pid)
     this.reachable = false
   }
 
@@ -404,10 +497,11 @@ export class GSCoreManager {
   async status(): Promise<Status> {
     const running = await this.refresh(true)
     const mode = getRuntimeMode()
+    const managedPID = mode === 'local' ? await this.managedLocalPID() : null
     // external 模式的“安装”由外部部署负责，服务暂时离线不代表未安装。
     const installed = mode === 'local' ? this.localInstalled() : mode === 'external' ? true : await this.containerExists()
     const processRunning = mode === 'local'
-      ? Boolean(this.localProcess && !this.localProcess.killed && this.localProcess.exitCode === null && this.localProcess.signalCode === null) || running
+      ? Boolean(managedPID) || running
       : running
     const ready = running
     const plugins = (mode === 'local' || mode === 'docker') && existsSync(getPluginsDir())
@@ -418,7 +512,7 @@ export class GSCoreManager {
       installed,
       running: processRunning,
       ready,
-      pid: mode === 'local' ? (this.localProcess?.pid ?? null) : null,
+      pid: mode === 'local' ? managedPID : null,
       logFile: this.localLogFile,
       busy: this.isBusy,
       busyTask: this.task,
@@ -428,7 +522,9 @@ export class GSCoreManager {
       plugins,
       message: ready ? 'GsCore 已连接。' : processRunning ? 'GsCore 进程正在启动，尚未就绪。' : installed ? 'GsCore 未运行。' : 'GsCore 尚未安装。',
       managementAuthEnabled: Boolean(getApiToken()),
-      task: this.taskState
+      task: this.taskState,
+      processOwner: mode !== 'local' ? 'none' : managedPID ? 'plugin' : running ? 'external' : 'none',
+      restartRequired: mode === 'local' && running && !managedPID
     }
   }
 
@@ -476,7 +572,7 @@ export class GSCoreManager {
       } finally {
         if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true })
       }
-      if (getRuntimeMode() === 'local' && this.localProcess) {
+      if (getRuntimeMode() === 'local' && await this.managedLocalPID()) {
         await this.stopLocalProcess()
         await this.startLocalProcess()
         logger.info('[GsCore] 配置已保存，并已重启本地 GsCore 使配置生效')
@@ -587,7 +683,7 @@ export class GSCoreManager {
       if (getRuntimeMode() === 'local' && !this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
       this.ensureDirectories()
       this.writeHTTPConfig()
-      if (getRuntimeMode() === 'local' && this.localProcess) {
+      if (getRuntimeMode() === 'local' && await this.managedLocalPID()) {
         await this.stopLocalProcess()
         await this.startLocalProcess()
         logger.info('[GsCore] 已写入 ENABLE_HTTP=true，并已重启本地 GsCore')
@@ -641,7 +737,7 @@ export class GSCoreManager {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(bridgeToken ? { 'x-ws-token': bridgeToken } : {}) },
         body: JSON.stringify(message)
-      })
+      }, getMessageTimeout())
     } catch (error) {
       this.reachable = false
       throw error
@@ -672,7 +768,7 @@ export class GSCoreManager {
   private async waitForReady(): Promise<void> {
     const deadline = Date.now() + (getRuntimeMode() === 'local' ? getStartupTimeout() : 60_000)
     while (Date.now() < deadline) {
-      if (getRuntimeMode() === 'local' && (!this.localProcess || this.localProcess.killed)) throw new Error(`GsCore 进程提前退出，请查看日志${this.localLogFile ? `：${this.localLogFile}` : ''}`)
+      if (getRuntimeMode() === 'local' && !(await this.managedLocalPID())) throw new Error(`GsCore 进程提前退出，请查看日志${this.localLogFile ? `：${this.localLogFile}` : ''}`)
       if (await this.refresh(true)) {
         this.localRestartCount = 0
         return

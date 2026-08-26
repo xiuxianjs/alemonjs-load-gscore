@@ -62,6 +62,12 @@
         "type": "number"
       },
       {
+        "description": "等待 GsCore 命令回复的超时时间（毫秒，默认 30000）",
+        "name": "message_timeout",
+        "required": false,
+        "type": "number"
+      },
+      {
         "description": "GsCore Docker 镜像",
         "name": "docker_image",
         "required": false,

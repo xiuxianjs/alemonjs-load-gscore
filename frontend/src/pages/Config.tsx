@@ -66,8 +66,8 @@ export default function Config() {
         const config = JSON.parse(text) as unknown;
         if (!config || typeof config !== "object" || Array.isArray(config))
           throw new Error("配置必须是 JSON 对象");
-        await saveConfig(config as Record<string, unknown>);
-        setNotice("配置已保存");
+        const status = await saveConfig(config as Record<string, unknown>);
+        setNotice(status.restartRequired ? "配置已保存；当前 GsCore 不受插件托管，请在原运行环境重启后使配置生效。" : "配置已保存");
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -111,6 +111,10 @@ export default function Config() {
           onChange={(event) => updateRegisterCode(event.target.value)}
           placeholder="未设置"
         />
+      </section>
+      <section className="card">
+        <h2>权限说明</h2>
+        <p className="muted">AlemonJS 的主人权限只用于保护 #gs 管理指令。若某个 GsCore 插件本身要求主人权限，还需在此配置 JSON 的 masters 中填写对应平台用户 ID；插件不会自动同步该名单，避免误改 GsCore 的授权策略。</p>
       </section>
       <section className="card token">
         <h2>管理 API Token</h2>
