@@ -1,4 +1,4 @@
-import type { GSCoreLogs, GSCoreStatus } from '../types'
+import type { GSCoreLogs, GSCoreStatus, OwnerClaimState } from '../types'
 
 type ApiResponse<T> = { code?: number; message?: string; data?: T }
 
@@ -68,6 +68,42 @@ export async function saveConfig(config: Record<string, unknown>): Promise<GSCor
     if (!status.busy) return status
   }
   throw new Error('配置保存等待超时，请查看任务状态')
+}
+
+export async function setTransport(transport: 'websocket' | 'http'): Promise<GSCoreStatus> {
+  const response = await fetch('./api/gscore/transport', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-gscore-token': getApiToken() },
+    body: JSON.stringify({ transport })
+  })
+  const body = await response.json().catch(() => ({})) as ApiResponse<GSCoreStatus>
+  if (!response.ok || body.code !== 200) throw new Error(body.message || `请求失败 (${response.status})`)
+  return body.data as GSCoreStatus
+}
+
+export async function getOwnerClaims(): Promise<OwnerClaimState> {
+  const response = await fetch('./api/gscore/owner-claims', { headers: { 'x-gscore-token': getApiToken() } })
+  const body = await response.json().catch(() => ({})) as ApiResponse<OwnerClaimState>
+  if (!response.ok || body.code !== 200) throw new Error(body.message || `请求失败 (${response.status})`)
+  return body.data ?? { claims: [], activeUntil: null }
+}
+
+export async function startOwnerClaim(): Promise<number> {
+  const response = await fetch('./api/gscore/owner-claims/start', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-gscore-token': getApiToken() }
+  })
+  const body = await response.json().catch(() => ({})) as ApiResponse<{ activeUntil: number }>
+  if (!response.ok || body.code !== 200 || !body.data?.activeUntil) throw new Error(body.message || `请求失败 (${response.status})`)
+  return body.data.activeUntil
+}
+
+export async function addOwnerClaim(userId: string): Promise<GSCoreStatus> {
+  const response = await fetch('./api/gscore/owner-claims/add', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-gscore-token': getApiToken() },
+    body: JSON.stringify({ userId })
+  })
+  const body = await response.json().catch(() => ({})) as ApiResponse<GSCoreStatus>
+  if (!response.ok || body.code !== 200) throw new Error(body.message || `请求失败 (${response.status})`)
+  return body.data as GSCoreStatus
 }
 
 export type StatusListener = (status: GSCoreStatus) => void

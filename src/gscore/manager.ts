@@ -5,6 +5,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renam
 import { join } from 'node:path'
 import {
   getAutoStart,
+  getBotID,
   getContainerName,
   getGSCoreCoreDir,
   getGSCoreDir,
@@ -20,14 +21,21 @@ import {
   getGSCoreVenvDir,
   getMessageTimeout,
   getRuntimeMode,
+  getTransport,
   getApiToken,
   getStartupTimeout,
   getWSToken
 } from '../path'
 import type { MessageReceive, MessageSend } from './types'
+import { GSCoreWebSocketAdapter, type PendingContext } from './adapter'
 
 type Status = {
   mode: string
+  transport: 'websocket' | 'http'
+  transportReady: boolean
+  wsConnected: boolean
+  wsLastError: string | null
+  wsReconnectCount: number
   installed: boolean
   running: boolean
   ready: boolean
@@ -69,6 +77,7 @@ export type GSCoreLogs = {
 }
 
 export type GSCoreConfigData = Record<string, unknown>
+export type GSCoreMessageHandler = (reply: MessageSend, context?: PendingContext) => Promise<void>
 
 function run(command: string, args: string[], options: { cwd?: string; timeout?: number } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -106,8 +115,19 @@ export class GSCoreManager {
   private localStopRequested = false
   private localRestartCount = 0
   private localRestartTimer: ReturnType<typeof setTimeout> | null = null
+  private messageHandler: GSCoreMessageHandler | null = null
+  private readonly adapter: GSCoreWebSocketAdapter
 
   constructor() {
+    this.adapter = new GSCoreWebSocketAdapter({
+      getURL: () => this.getWebSocketURL(),
+      getToken: () => this.getBridgeToken(),
+      onMessage: async (reply, context) => {
+        if (!this.messageHandler) throw new Error('消息桥接处理器尚未注册')
+        await this.messageHandler(reply, context)
+      },
+      onWarning: message => logger.warn(`[GsCore] ${message}`)
+    })
     this.restoreTaskState()
     this.restoreManagedProcessState()
     // GsCore 是独立运行时。保留由本插件启动的服务，下一次 AlemonJS 启动会通过
@@ -119,11 +139,47 @@ export class GSCoreManager {
   }
 
   get isReady(): boolean {
-    return this.reachable
+    return getTransport() === 'websocket' ? this.adapter.state.connected : this.reachable
   }
+
+  get transport(): 'websocket' | 'http' { return getTransport() }
 
   get busyTask(): string | null {
     return this.task
+  }
+
+  setMessageHandler(handler: GSCoreMessageHandler): void {
+    this.messageHandler = handler
+  }
+
+  async updateTransport(): Promise<boolean> {
+    this.adapter.stop(true)
+    this.reachable = false
+    return this.refresh(true)
+  }
+
+  private getWebSocketURL(): string {
+    const url = new URL(getGSCoreURL())
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.pathname = `/ws/${encodeURIComponent(getBotID())}`
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  }
+
+  private getBridgeToken(): string {
+    const configured = getWSToken()
+    if (configured) return configured
+    return getRuntimeMode() === 'external' ? '' : String(this.getConfig().WS_TOKEN ?? '')
+  }
+
+  private async serviceReachable(): Promise<boolean> {
+    try {
+      const response = await request('/app')
+      return response.ok || response.status === 302
+    } catch {
+      return false
+    }
   }
 
   private async withinTask<T>(name: string, operation: () => Promise<T>): Promise<T> {
@@ -344,7 +400,7 @@ export class GSCoreManager {
     try { appendFileSync(this.localLogFile, String(chunk), 'utf8') } catch { return }
   }
 
-  private writeHTTPConfig(): void {
+  private writeBridgeConfig(enableHTTP = getTransport() === 'http'): void {
     const path = join(getDataDir(), 'config.json')
     let config: Record<string, unknown> = {}
     if (existsSync(path)) {
@@ -352,7 +408,7 @@ export class GSCoreManager {
         throw new Error('GsCore data/config.json 不是有效 JSON，无法安全修改')
       }
     }
-    config.ENABLE_HTTP = true
+    if (enableHTTP) config.ENABLE_HTTP = true
     config.WS_TOKEN = getWSToken() || (typeof config.WS_TOKEN === 'string' && config.WS_TOKEN.trim() ? config.WS_TOKEN : randomBytes(24).toString('hex'))
     const temporaryPath = `${path}.tmp-${process.pid}`
     try {
@@ -369,10 +425,11 @@ export class GSCoreManager {
       return
     }
     if (!this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
-    if (await this.refresh(true)) {
+    if (await this.serviceReachable()) {
       throw new Error('GsCore 已在配置地址运行，当前进程不是本插件启动的；请勿重复启动，或先切换为 external 模式')
     }
     this.ensureDirectories()
+    this.writeBridgeConfig()
     const { command, args } = await this.localCommand()
     this.localStopRequested = false
     this.localLogFile = join(getGSCoreLogsDir(), `gscore-${new Date().toISOString().replace(/[:.]/g, '-')}.log`)
@@ -419,6 +476,7 @@ export class GSCoreManager {
   }
 
   private async stopLocalProcess(): Promise<void> {
+    this.adapter.stop(true)
     if (this.localRestartTimer) {
       clearTimeout(this.localRestartTimer)
       this.localRestartTimer = null
@@ -476,13 +534,18 @@ export class GSCoreManager {
 
   async refresh(force = false): Promise<boolean> {
     if (!force && Date.now() - this.lastRefreshAt < GSCoreManager.REFRESH_INTERVAL) {
-      return this.reachable
+      return this.isReady
     }
     if (this.refreshTask) return this.refreshTask
     this.refreshTask = (async () => {
       try {
-        const response = await request('/app')
-        this.reachable = response.ok || response.status === 302
+        if (getTransport() === 'websocket') {
+          this.adapter.start()
+          this.reachable = this.adapter.state.connected
+        } else {
+          const response = await request('/app')
+          this.reachable = response.ok || response.status === 302
+        }
       } catch {
         this.reachable = false
       } finally {
@@ -495,20 +558,27 @@ export class GSCoreManager {
   }
 
   async status(): Promise<Status> {
-    const running = await this.refresh(true)
+    const transport = getTransport()
+    const transportReady = await this.refresh(true)
+    const adapterState = this.adapter.state
     const mode = getRuntimeMode()
     const managedPID = mode === 'local' ? await this.managedLocalPID() : null
     // external 模式的“安装”由外部部署负责，服务暂时离线不代表未安装。
     const installed = mode === 'local' ? this.localInstalled() : mode === 'external' ? true : await this.containerExists()
     const processRunning = mode === 'local'
-      ? Boolean(managedPID) || running
-      : running
-    const ready = running
+      ? Boolean(managedPID) || transportReady || await this.serviceReachable()
+      : transportReady
+    const ready = transportReady
     const plugins = (mode === 'local' || mode === 'docker') && existsSync(getPluginsDir())
       ? readdirSync(getPluginsDir(), { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort()
       : []
     return {
       mode,
+      transport,
+      transportReady,
+      wsConnected: adapterState.connected,
+      wsLastError: adapterState.lastError,
+      wsReconnectCount: adapterState.reconnectCount,
       installed,
       running: processRunning,
       ready,
@@ -520,11 +590,13 @@ export class GSCoreManager {
       address: getGSCoreURL(),
       console: `${getGSCoreURL()}/app`,
       plugins,
-      message: ready ? 'GsCore 已连接。' : processRunning ? 'GsCore 进程正在启动，尚未就绪。' : installed ? 'GsCore 未运行。' : 'GsCore 尚未安装。',
+      message: ready
+        ? `GsCore 已通过 ${transport === 'websocket' ? 'WebSocket' : 'HTTP'} 连接。`
+        : processRunning ? 'GsCore 进程正在启动，桥接尚未就绪。' : installed ? 'GsCore 未运行。' : 'GsCore 尚未安装。',
       managementAuthEnabled: Boolean(getApiToken()),
       task: this.taskState,
-      processOwner: mode !== 'local' ? 'none' : managedPID ? 'plugin' : running ? 'external' : 'none',
-      restartRequired: mode === 'local' && running && !managedPID
+      processOwner: mode !== 'local' ? 'none' : managedPID ? 'plugin' : processRunning ? 'external' : 'none',
+      restartRequired: mode === 'local' && processRunning && !managedPID
     }
   }
 
@@ -558,25 +630,55 @@ export class GSCoreManager {
     }
   }
 
+  private writeConfig(config: GSCoreConfigData): void {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('配置必须是 JSON 对象')
+    this.ensureDirectories()
+    const path = join(getDataDir(), 'config.json')
+    const temporaryPath = `${path}.tmp-${process.pid}`
+    try {
+      writeFileSync(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
+      renameSync(temporaryPath, path)
+    } finally {
+      if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true })
+    }
+  }
+
+  private async restartAfterConfigChange(): Promise<void> {
+    if (getRuntimeMode() === 'local' && await this.managedLocalPID()) {
+      await this.stopLocalProcess()
+      await this.startLocalProcess()
+      logger.info('[GsCore] 配置已保存，并已重启本地 GsCore 使配置生效')
+    } else if (getRuntimeMode() === 'docker' && await this.containerExists()) {
+      this.adapter.stop(true)
+      await run('docker', ['restart', getContainerName()])
+      await this.waitForReady()
+      logger.info('[GsCore] 配置已保存，并已重启 Docker GsCore 使配置生效')
+    }
+  }
+
   async saveConfig(config: GSCoreConfigData): Promise<void> {
     await this.withinTask('保存 GsCore 配置', async () => {
       if (getRuntimeMode() === 'external') throw new Error('external 模式请在 GsCore 所在环境中修改配置')
       if (getRuntimeMode() === 'local' && !this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
-      if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('配置必须是 JSON 对象')
-      this.ensureDirectories()
-      const path = join(getDataDir(), 'config.json')
-      const temporaryPath = `${path}.tmp-${process.pid}`
-      try {
-        writeFileSync(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
-        renameSync(temporaryPath, path)
-      } finally {
-        if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true })
-      }
-      if (getRuntimeMode() === 'local' && await this.managedLocalPID()) {
-        await this.stopLocalProcess()
-        await this.startLocalProcess()
-        logger.info('[GsCore] 配置已保存，并已重启本地 GsCore 使配置生效')
-      }
+      this.writeConfig(config)
+      await this.restartAfterConfigChange()
+    })
+  }
+
+  async addMaster(userId: string): Promise<void> {
+    await this.withinTask('添加 GsCore 主人', async () => {
+      if (getRuntimeMode() === 'external') throw new Error('external 模式请在外部 GsCore 的 data/config.json 中添加 masters')
+      if (getRuntimeMode() === 'local' && !this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
+      const normalized = userId.trim()
+      if (!normalized) throw new Error('UserId 不能为空')
+      const config = this.getConfig()
+      const masters = Array.isArray(config.masters)
+        ? config.masters.map(value => String(value).trim()).filter(Boolean)
+        : []
+      if (!masters.includes(normalized)) masters.push(normalized)
+      config.masters = masters
+      this.writeConfig(config)
+      await this.restartAfterConfigChange()
     })
   }
 
@@ -596,7 +698,7 @@ export class GSCoreManager {
           logger.info('[GsCore] Python 依赖已准备完成，正在写入 HTTP 配置')
           this.setTaskPhase('写入 HTTP 配置')
           this.ensureDirectories()
-          this.writeHTTPConfig()
+          this.writeBridgeConfig()
           logger.info('[GsCore] 本地 GsCore 安装完成')
         } catch (error) {
           if (existsSync(getGSCoreCoreDir())) rmSync(getGSCoreCoreDir(), { recursive: true, force: true })
@@ -608,6 +710,7 @@ export class GSCoreManager {
         throw new Error('当前为 external 模式，请自行部署 GsCore；Docker 托管请设置 runtime_mode: docker')
       await this.dockerInstalled()
       this.ensureDirectories()
+      this.writeBridgeConfig()
       await run('docker', ['pull', getDockerImage()])
       const name = getContainerName()
       try {
@@ -658,6 +761,7 @@ export class GSCoreManager {
         return
       }
       if (getRuntimeMode() !== 'docker') throw new Error('external 模式不会停止用户自行部署的 GsCore')
+      this.adapter.stop(true)
       await run('docker', ['stop', getContainerName()])
       this.reachable = false
     })
@@ -671,6 +775,7 @@ export class GSCoreManager {
         return
       }
       if (getRuntimeMode() !== 'docker') throw new Error('external 模式请在 GsCore 所在环境中重启服务')
+      this.adapter.stop(true)
       await run('docker', ['restart', getContainerName()])
       await this.waitForReady()
     })
@@ -682,7 +787,7 @@ export class GSCoreManager {
         throw new Error('external 模式请在 GsCore 的 data/config.json 中设置 ENABLE_HTTP=true 后重启服务')
       if (getRuntimeMode() === 'local' && !this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
       this.ensureDirectories()
-      this.writeHTTPConfig()
+      this.writeBridgeConfig(true)
       if (getRuntimeMode() === 'local' && await this.managedLocalPID()) {
         await this.stopLocalProcess()
         await this.startLocalProcess()
@@ -729,7 +834,12 @@ export class GSCoreManager {
     })
   }
 
-  async send(message: MessageReceive): Promise<MessageSend | null> {
+  async send(message: MessageReceive, context?: PendingContext): Promise<MessageSend | null> {
+    if (getTransport() === 'websocket') {
+      this.adapter.send(message, context)
+      this.reachable = this.adapter.state.connected
+      return null
+    }
     let response: Response
     try {
       const bridgeToken = getWSToken() || String(this.getConfig().WS_TOKEN ?? '')
@@ -744,7 +854,8 @@ export class GSCoreManager {
     }
     if (!response.ok) {
       this.reachable = false
-      throw new Error(`GsCore HTTP 请求失败：${response.status}`)
+      const detail = (await response.text()).trim().replace(/\s+/g, ' ').slice(0, 500)
+      throw new Error(`GsCore HTTP 请求失败：${response.status}${detail ? `：${detail}` : ''}`)
     }
     let result: { status_code?: number; data?: MessageSend | null }
     try {

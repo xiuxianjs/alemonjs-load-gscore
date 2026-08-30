@@ -42,6 +42,10 @@ export default async () => {
   }
 
   try {
+    if (action === 'enable-http' && manager.transport === 'websocket') {
+      await reply('当前已使用 WebSocket，无需启用 ENABLE_HTTP。若需兼容 HTTP，请在管理面板的配置页切换传输方式。')
+      return
+    }
     if (backgroundActions.includes(action)) {
       if (manager.isBusy) throw new Error(`正在${manager.busyTask}，请等待完成`)
       runGSCoreActionInBackground(action, payload)

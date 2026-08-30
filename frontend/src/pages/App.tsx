@@ -54,7 +54,7 @@ export default function App() {
     <SidebarDiv className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
       <div className="brand-row">
         <button className="brand-badge" type="button" onClick={() => setDark(value => !value)} title="切换主题">⚡</button>
-        <div className="brand-copy"><div className="brand-name">GsCore</div><div className="brand-subtitle">AlemonJS 控制台</div></div>
+        <div className="brand-copy"><div className="brand-name">GsCore</div><div className="brand-subtitle">AlemonJS</div></div>
         <button className="sidebar-toggle" type="button" onClick={() => setSidebarCollapsed(value => !value)} aria-label={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'} title={sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}>{sidebarCollapsed ? '›' : '‹'}</button>
       </div>
       <div className="nav-group-label">运行管理</div>

@@ -1,10 +1,12 @@
-import { getConfigValue } from 'alemonjs'
+import { getConfig, getConfigValue } from 'alemonjs'
 import { join } from 'node:path'
 
 export type RuntimeMode = 'local' | 'external' | 'docker'
+export type TransportMode = 'websocket' | 'http'
 
 type GSCoreConfig = {
   runtime_mode?: RuntimeMode
+  transport?: TransportMode
   gscore_url?: string
   gscore_repo?: string
   bot_id?: string
@@ -30,6 +32,17 @@ function getConfig(): GSCoreConfig {
 export function getRuntimeMode(): RuntimeMode {
   const mode = getConfig().runtime_mode
   return mode === 'external' || mode === 'docker' ? mode : 'local'
+}
+
+export function getTransport(): TransportMode {
+  return getConfig().value?.['alemonjs-load-gscore']?.transport === 'http' ? 'http' : 'websocket'
+}
+
+export function setTransport(transport: TransportMode): void {
+  const config = getConfig()
+  const values = config.value ?? {}
+  const current = (values['alemonjs-load-gscore'] as GSCoreConfig | undefined) ?? {}
+  config.saveValue({ ...values, 'alemonjs-load-gscore': { ...current, transport } })
 }
 
 export function getGSCoreURL(): string {

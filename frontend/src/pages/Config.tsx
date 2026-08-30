@@ -1,5 +1,6 @@
 import {useEffect, useState} from "react";
-import {getApiToken, getConfig, getStatus, saveConfig, setApiToken} from "../api/web-api";
+import {addOwnerClaim, getApiToken, getConfig, getOwnerClaims, getStatus, saveConfig, setApiToken, setTransport, startOwnerClaim} from "../api/web-api";
+import type {OwnerClaim} from "../types";
 
 export default function Config() {
   const [token, setToken] = useState(getApiToken());
@@ -8,6 +9,9 @@ export default function Config() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState("");
   const [authEnabled, setAuthEnabled] = useState(false);
+  const [transport, setTransportState] = useState<"websocket" | "http">("websocket");
+  const [ownerClaims, setOwnerClaims] = useState<OwnerClaim[]>([]);
+  const [ownerClaimUntil, setOwnerClaimUntil] = useState<number | null>(null);
   const applyConfig = (config: Record<string, unknown>) => {
     setText(JSON.stringify(config, null, 2));
     setRegisterCode(typeof config.REGISTER_CODE === "string" ? config.REGISTER_CODE : "");
@@ -56,7 +60,14 @@ export default function Config() {
     };
   }, []);
   useEffect(() => {
-    void getStatus().then(status => setAuthEnabled(status.managementAuthEnabled)).catch(() => undefined);
+    void getStatus().then(status => { setAuthEnabled(status.managementAuthEnabled); setTransportState(status.transport); }).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    const loadClaims = () => void getOwnerClaims().then(state => { if (!disposed) { setOwnerClaims(state.claims); setOwnerClaimUntil(state.activeUntil); } }).catch(error => { if (!disposed) setNotice(error instanceof Error ? error.message : String(error)); });
+    loadClaims();
+    const timer = window.setInterval(loadClaims, 2000);
+    return () => { disposed = true; window.clearInterval(timer); };
   }, []);
   const run = async (kind: "load" | "save") => {
     setLoading(kind);
@@ -69,6 +80,42 @@ export default function Config() {
         const status = await saveConfig(config as Record<string, unknown>);
         setNotice(status.restartRequired ? "配置已保存；当前 GsCore 不受插件托管，请在原运行环境重启后使配置生效。" : "配置已保存");
       }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading("");
+    }
+  };
+  const updateTransport = async (value: "websocket" | "http") => {
+    setLoading("transport");
+    try {
+      const status = await setTransport(value);
+      setTransportState(status.transport);
+      setNotice(value === "websocket" ? "已切换为 WebSocket Adapter。请确认 GsCore 的 WS_TOKEN 已配置。" : "已切换为 HTTP 兼容模式。请确认 GsCore 已启用 ENABLE_HTTP=true。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading("");
+    }
+  };
+  const addMaster = async (claim: OwnerClaim) => {
+    setLoading(`master:${claim.userId}`);
+    try {
+      await addOwnerClaim(claim.userId);
+      setOwnerClaims(current => current.filter(item => item.userId !== claim.userId));
+      setNotice(`已将 ${claim.userName || claim.userId} 添加为 GsCore 主人。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading("");
+    }
+  };
+  const beginOwnerClaim = async () => {
+    setLoading("owner-claim");
+    try {
+      setOwnerClaims([]);
+      setOwnerClaimUntil(await startOwnerClaim());
+      setNotice('主人认领已开启，请让用户在 5 分钟内私聊机器人发送“/我是主人”。收到后仍需在此手动确认添加。');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -111,6 +158,20 @@ export default function Config() {
           onChange={(event) => updateRegisterCode(event.target.value)}
           placeholder="未设置"
         />
+      </section>
+      <section className="card">
+        <h2>添加 GsCore 主人</h2>
+        <p className="muted">先开启认领，再让要授权的用户私聊机器人发送“/我是主人”。平台 UserId 会在此处自动出现；只有点击“添加为主人”后才会写入 GsCore 的 masters。频道或群聊发送不会登记。</p>
+        <div className="action-row"><button className="button primary" disabled={Boolean(loading)} onClick={() => void beginOwnerClaim()}>{loading === 'owner-claim' ? '开启中…' : '开启认领（5 分钟）'}</button>{ownerClaimUntil && <span className="muted">认领进行中，截止 {new Date(ownerClaimUntil).toLocaleTimeString()}。</span>}</div>
+        {ownerClaims.length ? ownerClaims.map(claim => <div className="action-row" key={claim.userId}><span className="muted">{claim.userName || '未命名用户'}：{claim.userId}</span><button className="button primary" disabled={Boolean(loading)} onClick={() => void addMaster(claim)}>{loading === `master:${claim.userId}` ? '添加中…' : '添加为主人'}</button></div>) : <p className="muted">{ownerClaimUntil ? '等待“/我是主人”请求…' : '尚未开启认领。'}</p>}
+      </section>
+      <section className="card">
+        <h2>桥接传输</h2>
+        <p className="muted">WebSocket 是推荐方式，支持 GsCore 主动消息；HTTP 仅用于兼容旧部署。</p>
+        <select aria-label="桥接传输" value={transport} disabled={Boolean(loading)} onChange={(event) => void updateTransport(event.target.value as "websocket" | "http")}>
+          <option value="websocket">WebSocket（推荐，需要 WS_TOKEN）</option>
+          <option value="http">HTTP（兼容，需要 ENABLE_HTTP=true）</option>
+        </select>
       </section>
       <section className="card">
         <h2>权限说明</h2>

@@ -1,5 +1,10 @@
 export type GSCoreStatus = {
   mode: string
+  transport: 'websocket' | 'http'
+  transportReady: boolean
+  wsConnected: boolean
+  wsLastError: string | null
+  wsReconnectCount: number
   installed: boolean
   running: boolean
   ready: boolean
@@ -31,4 +36,15 @@ export type GSCoreLogs = {
   activeFile: string
   content: string
   truncated: boolean
+}
+
+export type OwnerClaim = {
+  userId: string
+  userName: string
+  createdAt: number
+}
+
+export type OwnerClaimState = {
+  claims: OwnerClaim[]
+  activeUntil: number | null
 }

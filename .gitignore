@@ -6,3 +6,4 @@ runtime
 *.log
 .env
 /GsCore
+/.data

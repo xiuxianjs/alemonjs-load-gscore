@@ -2,9 +2,9 @@ import bodyParser from 'koa-bodyparser'
 import KoaRouter from 'koa-router'
 import { backgroundActions, runGSCoreAction, runGSCoreActionInBackground } from './gscore/control'
 import { isGSCoreAction } from './gscore/actions'
-import { getApiToken } from './path'
-import { getGSCoreURL } from './path'
+import { getApiToken, getGSCoreURL, setTransport, type TransportMode } from './path'
 import { manager } from './gscore/manager'
+import { getOwnerClaimState, startOwnerClaimWindow } from './gscore/owner-claim'
 
 const apiRouter = new KoaRouter({ prefix: '/api/gscore' })
 apiRouter.use(bodyParser())
@@ -102,6 +102,77 @@ apiRouter.post('/config', async ctx => {
     runGSCoreActionInBackground('save-config', { config: body.config })
     ctx.status = 202
     ctx.body = { code: 202, message: '配置保存任务已开始，请通过状态接口查看进度', data: await runGSCoreAction('status') }
+  } catch (error) {
+    ctx.status = 400
+    ctx.body = { code: 400, message: error instanceof Error ? error.message : String(error), data: null }
+  }
+})
+
+apiRouter.post('/transport', async ctx => {
+  const token = getApiToken()
+  if (token && ctx.get('x-gscore-token') !== token) {
+    ctx.status = 401
+    ctx.body = { code: 401, message: '需要有效的 x-gscore-token', data: null }
+    return
+  }
+  const body = (ctx.request as { body?: Record<string, unknown> }).body ?? {}
+  const transport = body.transport
+  if (transport !== 'websocket' && transport !== 'http') {
+    ctx.status = 400
+    ctx.body = { code: 400, message: 'transport 必须是 websocket 或 http', data: null }
+    return
+  }
+  try {
+    setTransport(transport as TransportMode)
+    await manager.updateTransport()
+    ctx.status = 200
+    ctx.body = { code: 200, message: '传输方式已更新', data: await manager.status() }
+  } catch (error) {
+    ctx.status = 400
+    ctx.body = { code: 400, message: error instanceof Error ? error.message : String(error), data: null }
+  }
+})
+
+apiRouter.get('/owner-claims', async ctx => {
+  const token = getApiToken()
+  if (token && ctx.get('x-gscore-token') !== token) {
+    ctx.status = 401
+    ctx.body = { code: 401, message: '需要有效的 x-gscore-token', data: null }
+    return
+  }
+  ctx.status = 200
+  ctx.body = { code: 200, message: 'ok', data: getOwnerClaimState() }
+})
+
+apiRouter.post('/owner-claims/start', async ctx => {
+  const token = getApiToken()
+  if (token && ctx.get('x-gscore-token') !== token) {
+    ctx.status = 401
+    ctx.body = { code: 401, message: '需要有效的 x-gscore-token', data: null }
+    return
+  }
+  ctx.status = 200
+  ctx.body = { code: 200, message: '主人认领已开启', data: { activeUntil: startOwnerClaimWindow() } }
+})
+
+apiRouter.post('/owner-claims/add', async ctx => {
+  const token = getApiToken()
+  if (token && ctx.get('x-gscore-token') !== token) {
+    ctx.status = 401
+    ctx.body = { code: 401, message: '需要有效的 x-gscore-token', data: null }
+    return
+  }
+  const body = (ctx.request as { body?: Record<string, unknown> }).body ?? {}
+  const userId = typeof body.userId === 'string' ? body.userId : ''
+  try {
+    if (manager.isBusy) {
+      ctx.status = 409
+      ctx.body = { code: 409, message: `正在${manager.busyTask}，请等待完成`, data: null }
+      return
+    }
+    await manager.addMaster(userId)
+    ctx.status = 200
+    ctx.body = { code: 200, message: '已添加 GsCore 主人', data: await manager.status() }
   } catch (error) {
     ctx.status = 400
     ctx.body = { code: 400, message: error instanceof Error ? error.message : String(error), data: null }
