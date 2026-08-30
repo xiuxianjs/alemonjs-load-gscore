@@ -8,6 +8,12 @@
         "type": "string"
       },
       {
+        "description": "消息桥接传输：websocket（默认）或 http（兼容模式）",
+        "name": "transport",
+        "required": false,
+        "type": "string"
+      },
+      {
         "description": "GsCore HTTP 地址",
         "name": "gscore_url",
         "required": false,
@@ -26,7 +32,7 @@
         "type": "string"
       },
       {
-        "description": "GsCore WsToken（仅 WebSocket 模式预留）",
+        "description": "GsCore WS_TOKEN，用于 WebSocket 和 HTTP 桥接鉴权",
         "name": "ws_token",
         "required": false,
         "type": "string"
@@ -84,7 +90,8 @@
   "author": "alemonjs",
   "dependencies": {
     "koa-bodyparser": "^4.4.1",
-    "koa-router": "^14.0.0"
+    "koa-router": "^14.0.0",
+    "ws": "^8.18.0"
   },
   "description": "托管并桥接 GsCore 插件生态",
   "exports": {
@@ -100,5 +107,5 @@
     "access": "public"
   },
   "type": "module",
-  "version": "0.0.1"
+  "version": "0.0.2"
 }

@@ -1,6 +1,6 @@
 # AlemonJS 加载 GsCore
 
-将 GsCore 作为独立运行时托管，并通过其官方 HTTP/早柚协议把 AlemonJS 消息转给原生 GsCore 插件。
+将 GsCore 作为独立运行时托管，并通过其官方 WebSocket Adapter 协议把 AlemonJS 消息转给原生 GsCore 插件。HTTP 桥接保留为兼容模式。
 
 它不会将 Python 插件转换为 AlemonJS 插件：GsCore 插件仍在 GsCore 的 `plugins` 目录中运行，保留原有配置、数据库、热重载和插件生态。
 
@@ -12,6 +12,9 @@ alemonjs-load-gscore:
   # external：连接已部署的 GsCore
   # docker：兼容旧的容器托管模式
   runtime_mode: local
+  # websocket：标准双向 Adapter（默认，支持主动消息）
+  # http：兼容旧部署，需 ENABLE_HTTP=true
+  transport: websocket
   gscore_url: http://127.0.0.1:8765
   gscore_repo: https://github.com/Genshin-bots/gsuid_core.git
   bot_id: AlemonJS
@@ -25,9 +28,9 @@ alemonjs-load-gscore:
   message_timeout: 30000
 ```
 
-GsCore 必须开启 `ENABLE_HTTP=true`，因为桥接调用其 `/api/send_msg` 接口。local 模式下插件会安装并启动本机 GsCore；external 模式下 GsCore 的启动、停止和插件目录由外部部署负责。
+WebSocket 模式使用 `/ws/{bot_id}`，需要 `WS_TOKEN`，但不要求 `ENABLE_HTTP=true`。HTTP 模式调用 `/api/send_msg`，必须开启 `ENABLE_HTTP=true`。local 模式下插件会安装并启动本机 GsCore；external 模式下 GsCore 的启动、停止和插件目录由外部部署负责。
 
-启用 HTTP 时插件会同时确保 `WS_TOKEN` 存在，并在桥接请求中自动携带 `X-WS-Token`；也可以在插件配置中预先设置 `ws_token`。因此不需要关闭 GsCore 的接口鉴权。
+local 和 Docker 模式会确保 `WS_TOKEN` 存在；external 模式请在插件配置中显式设置 `ws_token`。WebSocket 使用 `token` 查询参数，HTTP 使用 `X-WS-Token`，因此不需要关闭 GsCore 的接口鉴权。
 
 首次使用 local 模式需要宿主机具备 Git、Python 3.11+ 和至少 512MB 可用磁盘空间。安装前插件会检查仓库地址、Git、Python、磁盘空间以及目标目录，避免在不完整目录上继续安装。如果存在 `uv`、`poetry` 或 `pdm`，插件会优先使用它们；否则会自动筛选可用的 Python 3.11+，在 `<gscore_dir>/.venv` 创建独立虚拟环境并安装 GsCore 项目，不污染系统 Python。安装后源码位于 `<gscore_dir>/core`，GsCore 数据和插件使用其实际的 `<gscore_dir>/core/data`、`<gscore_dir>/core/gsuid_core/plugins`，插件日志位于 `<gscore_dir>/logs`。它是独立运行时：插件会持久化它拉起的本地进程 PID 与启动指纹，因此 AlemonJS 重启不会中断 GsCore，下次启动后仍能安全地继续停止、重启并应用配置；启动前也会先探测配置地址，已有外部 GsCore 运行时不会重复拉起第二个进程，更不会误停止它。
 
@@ -56,7 +59,7 @@ Docker 托管仍作为可选兼容模式保留，可使用 `#gs 安装` 创建�
 
 管理操作通过后台任务执行，前端会轮询状态直到完成；状态响应会返回当前管理任务的 `task.phase`、任务结果和最近一次错误。AlemonJS 重启后，未完成任务会标记为 `interrupted`，避免误报为成功。`busy` 和 `busyTask` 仍保留用于兼容旧面板。消息桥接在 GsCore 尚未探测就绪时会先等待一次探测，不会直接丢弃刚启动后的第一条消息。
 
-消息桥接默认等待 GsCore 最多 30 秒，覆盖 GsCore HTTP 模式的命令等待窗口。耗时更长的插件命令可通过 `message_timeout` 调整，范围为 5 至 120 秒。
+WebSocket 模式下，GsCore 的回复和主动消息通过长连接异步送达；连接断开时会按 1、2、4、8、15、30 秒退避重连。HTTP 模式默认等待 GsCore 最多 30 秒，耗时更长的插件命令可通过 `message_timeout` 调整，范围为 5 至 120 秒。
 Docker 模式下，`installed` 以实际容器是否存在为准，不会因为仅创建了数据目录而误报已安装。
 
 ## 前端面板
