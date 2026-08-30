@@ -7,3 +7,4 @@ runtime
 .env
 /GsCore
 /.data
+/alemon.config.yaml

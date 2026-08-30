@@ -1,9 +1,9 @@
-import type { GSCoreLogs, GSCoreStatus, OwnerClaimState } from '../types'
+import type { CoreCommandPrefix, GSCoreLogs, GSCoreStatus, OwnerClaimState } from '../types'
 
 type ApiResponse<T> = { code?: number; message?: string; data?: T }
 
 async function request<T>(path: string): Promise<T> {
-  const response = await fetch(path)
+  const response = await fetch(path, { headers: { 'x-gscore-token': getApiToken() } })
   const body = await response.json().catch(() => ({})) as ApiResponse<T>
   if (!response.ok || body.code !== 200) throw new Error(body.message || `请求失败 (${response.status})`)
   return body.data as T
@@ -13,11 +13,10 @@ export function getStatus(): Promise<GSCoreStatus> {
   return request<GSCoreStatus>('./api/gscore/status')
 }
 
-const TOKEN_KEY = 'alemonjs-load-gscore:api-token'
-let apiToken = localStorage.getItem(TOKEN_KEY) ?? ''
+let apiToken = ''
 
 export function getApiToken(): string { return apiToken }
-export function setApiToken(value: string): void { apiToken = value; localStorage.setItem(TOKEN_KEY, value) }
+export function setApiToken(value: string): void { apiToken = value }
 
 export async function runAction(action: string, payload: Record<string, unknown> = {}): Promise<GSCoreStatus> {
   const response = await fetch('./api/gscore/action', {
@@ -46,11 +45,27 @@ export function getLogs(file?: string): Promise<GSCoreLogs> {
   return request<GSCoreLogs>(`./api/gscore/logs${params.toString() ? `?${params}` : ''}`)
 }
 
+export async function deleteLog(file: string): Promise<GSCoreLogs> {
+  const response = await fetch(`./api/gscore/logs/${encodeURIComponent(file)}`, {
+    method: 'DELETE', headers: { 'x-gscore-token': getApiToken() }
+  })
+  const body = await response.json().catch(() => ({})) as ApiResponse<GSCoreLogs>
+  if (!response.ok || body.code !== 200) throw new Error(body.message || `删除失败 (${response.status})`)
+  return body.data as GSCoreLogs
+}
+
 export async function getConfig(): Promise<Record<string, unknown>> {
   const response = await fetch('./api/gscore/config', { headers: { 'x-gscore-token': getApiToken() } })
   const body = await response.json().catch(() => ({})) as ApiResponse<Record<string, unknown>>
   if (!response.ok || body.code !== 200) throw new Error(body.message || `请求失败 (${response.status})`)
   return body.data ?? {}
+}
+
+export async function getCoreCommandPrefix(): Promise<CoreCommandPrefix> {
+  const response = await fetch('./api/gscore/core-command-prefix', { headers: { 'x-gscore-token': getApiToken() } })
+  const body = await response.json().catch(() => ({})) as ApiResponse<CoreCommandPrefix>
+  if (!response.ok || body.code !== 200) throw new Error(body.message || `请求失败 (${response.status})`)
+  return body.data ?? { available: false, prefix: '', required: false }
 }
 
 export async function saveConfig(config: Record<string, unknown>): Promise<GSCoreStatus> {
@@ -96,14 +111,13 @@ export async function startOwnerClaim(): Promise<number> {
   return body.data.activeUntil
 }
 
-export async function addOwnerClaim(userId: string): Promise<GSCoreStatus> {
+export async function addOwnerClaim(userId: string): Promise<void> {
   const response = await fetch('./api/gscore/owner-claims/add', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-gscore-token': getApiToken() },
     body: JSON.stringify({ userId })
   })
-  const body = await response.json().catch(() => ({})) as ApiResponse<GSCoreStatus>
+  const body = await response.json().catch(() => ({})) as ApiResponse<Record<string, unknown>>
   if (!response.ok || body.code !== 200) throw new Error(body.message || `请求失败 (${response.status})`)
-  return body.data as GSCoreStatus
 }
 
 export type StatusListener = (status: GSCoreStatus) => void

@@ -74,6 +74,23 @@ apiRouter.get('/logs', async ctx => {
   ctx.body = { code: 200, message: 'ok', data: await runGSCoreAction('logs', { file, lines }) }
 })
 
+apiRouter.delete('/logs/:file', async ctx => {
+  const token = getApiToken()
+  if (token && ctx.get('x-gscore-token') !== token) {
+    ctx.status = 401
+    ctx.body = { code: 401, message: '需要有效的 x-gscore-token', data: null }
+    return
+  }
+  try {
+    const file = Array.isArray(ctx.params.file) ? ctx.params.file.join('') : ctx.params.file ?? ''
+    ctx.status = 200
+    ctx.body = { code: 200, message: '日志已删除', data: manager.deleteLog(file) }
+  } catch (error) {
+    ctx.status = 400
+    ctx.body = { code: 400, message: error instanceof Error ? error.message : String(error), data: null }
+  }
+})
+
 apiRouter.get('/config', async ctx => {
   const token = getApiToken()
   if (token && ctx.get('x-gscore-token') !== token) {
@@ -83,6 +100,17 @@ apiRouter.get('/config', async ctx => {
   }
   ctx.status = 200
   ctx.body = { code: 200, message: 'ok', data: await runGSCoreAction('get-config') }
+})
+
+apiRouter.get('/core-command-prefix', async ctx => {
+  const token = getApiToken()
+  if (token && ctx.get('x-gscore-token') !== token) {
+    ctx.status = 401
+    ctx.body = { code: 401, message: '需要有效的 x-gscore-token', data: null }
+    return
+  }
+  ctx.status = 200
+  ctx.body = { code: 200, message: 'ok', data: manager.getCoreCommandPrefix() }
 })
 
 apiRouter.post('/config', async ctx => {
@@ -165,14 +193,10 @@ apiRouter.post('/owner-claims/add', async ctx => {
   const body = (ctx.request as { body?: Record<string, unknown> }).body ?? {}
   const userId = typeof body.userId === 'string' ? body.userId : ''
   try {
-    if (manager.isBusy) {
-      ctx.status = 409
-      ctx.body = { code: 409, message: `正在${manager.busyTask}，请等待完成`, data: null }
-      return
-    }
     await manager.addMaster(userId)
     ctx.status = 200
-    ctx.body = { code: 200, message: '已添加 GsCore 主人', data: await manager.status() }
+    // 认领写入不应为了回传运行状态而等待离线 GsCore 的 WebSocket 探测。
+    ctx.body = { code: 200, message: '已添加 GsCore 主人', data: { userId, restartDeferred: manager.isBusy } }
   } catch (error) {
     ctx.status = 400
     ctx.body = { code: 400, message: error instanceof Error ? error.message : String(error), data: null }

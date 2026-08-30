@@ -95,7 +95,7 @@ export class GSCoreWebSocketAdapter {
         const token = this.options.getToken().trim()
         if (!token) throw new Error('未配置 WS_TOKEN；请配置 ws_token，或在本地/容器模式下启用一次桥接配置')
         url.searchParams.set('token', token)
-        socket = new WebSocket(url)
+        socket = new WebSocket(url, { handshakeTimeout: 10_000 })
       } catch (error) {
         this.recordError(error)
         this.scheduleReconnect()

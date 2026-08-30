@@ -124,6 +124,7 @@
     "build:frontend": "yarn --cwd frontend build",
     "build:runtime": "lvy build",
     "dev": "lvy app.ts --serverPort 17188",
+    "dev-fe": "yarn --cwd frontend dev",
     "bundle": "yarn --cwd frontend install && yarn --cwd frontend build && yarn install && lvy build",
     "install:frontend": "yarn --cwd frontend install",
     "lint": "eslint src --ext .ts --max-warnings=0",

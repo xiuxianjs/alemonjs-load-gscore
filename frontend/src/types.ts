@@ -48,3 +48,9 @@ export type OwnerClaimState = {
   claims: OwnerClaim[]
   activeUntil: number | null
 }
+
+export type CoreCommandPrefix = {
+  available: boolean
+  prefix: string
+  required: boolean
+}

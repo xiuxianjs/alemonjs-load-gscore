@@ -5,15 +5,16 @@ const Manage = lazy(() => import('./Manage'))
 const Logs = lazy(() => import('./Logs'))
 const Config = lazy(() => import('./Config'))
 const Console = lazy(() => import('./Console'))
+const Commands = lazy(() => import('./Commands'))
 
 const THEME_KEY = 'alemonjs-load-gscore:theme'
 const SIDEBAR_KEY = 'alemonjs-load-gscore:sidebar-collapsed'
 
-type PageKey = 'manage' | 'logs' | 'config' | 'console'
+type PageKey = 'manage' | 'logs' | 'config' | 'commands' | 'console'
 
 function currentPage(): PageKey {
   const page = window.location.hash.replace(/^#\/?/, '').split('/')[0]
-  return page === 'logs' || page === 'config' || page === 'console' ? page : 'manage'
+  return page === 'logs' || page === 'config' || page === 'commands' || page === 'console' ? page : 'manage'
 }
 
 function NavItem({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: string; label: string }) {
@@ -48,7 +49,7 @@ export default function App() {
     window.location.hash = `/${next}`
     setPage(next)
   }
-  const title = useMemo(() => ({ manage: '管理', logs: '日志', config: '配置', console: 'GsCore 控制台' })[page], [page])
+  const title = useMemo(() => ({ manage: '管理', logs: '日志', config: '配置', commands: '指令', console: 'GsCore 控制台' })[page], [page])
 
   return <SecondaryDiv className="app-shell">
     <SidebarDiv className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
@@ -61,15 +62,15 @@ export default function App() {
       <NavItem active={page === 'manage'} onClick={() => go('manage')} icon="⚡" label="管理" />
       <NavItem active={page === 'logs'} onClick={() => go('logs')} icon="📜" label="日志" />
       <NavItem active={page === 'config'} onClick={() => go('config')} icon="⚙️" label="配置" />
+      <NavItem active={page === 'commands'} onClick={() => go('commands')} icon="⌘" label="指令" />
       <NavItem active={page === 'console'} onClick={() => go('console')} icon="🖥️" label="控制台" />
-      <div className="sidebar-foot">本机 GsCore<br /><span>由插件统一托管</span></div>
     </SidebarDiv>
     <div className="main-shell">
       <div className="mobile-header">
-        <HeaderDiv className="mobile-brand"><button className="brand-badge" type="button" onClick={() => setDark(value => !value)}>⚡</button><strong>GsCore</strong><span>控制台</span></HeaderDiv>
-        <div className="mobile-tabs" role="tablist">{(['manage', 'logs', 'config', 'console'] as PageKey[]).map(key => <button key={key} type="button" role="tab" aria-selected={page === key} className={`tab${page === key ? ' active' : ''}`} onClick={() => go(key)}>{{ manage: '管理', logs: '日志', config: '配置', console: '控制台' }[key]}</button>)}</div>
+        <HeaderDiv className="mobile-brand"><button className="brand-badge" type="button" onClick={() => setDark(value => !value)} aria-label="切换主题" title="切换主题">⚡</button><strong>GsCore</strong><span>控制台</span></HeaderDiv>
+        <div className="mobile-tabs" role="tablist">{(['manage', 'logs', 'config', 'commands', 'console'] as PageKey[]).map(key => <button key={key} type="button" role="tab" aria-selected={page === key} className={`tab${page === key ? ' active' : ''}`} onClick={() => go(key)}>{{ manage: '管理', logs: '日志', config: '配置', commands: '指令', console: '控制台' }[key]}</button>)}</div>
       </div>
-      <main className={`content${page === 'console' ? ' console-content' : ''}`}>{page !== 'console' && <div className="page-heading"><h1>{title}</h1></div>}<Suspense fallback={<div className="page-loading"><span className="spinner" />正在打开页面…</div>}>{page === 'manage' && <Manage />}{page === 'logs' && <Logs />}{page === 'config' && <Config />}{page === 'console' && <Console />}</Suspense></main>
+      <main className={`content${page === 'console' ? ' console-content' : ''}`}>{page !== 'console' && <div className="page-heading"><h1>{title}</h1></div>}<Suspense fallback={<div className="page-loading"><span className="spinner" />正在打开页面…</div>}>{page === 'manage' && <Manage />}{page === 'logs' && <Logs />}{page === 'config' && <Config />}{page === 'commands' && <Commands />}{page === 'console' && <Console />}</Suspense></main>
     </div>
   </SecondaryDiv>
 }

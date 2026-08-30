@@ -277,6 +277,27 @@ h2 {
     margin-bottom: 15px;
 }
 
+.error-notice,
+.inline-warning {
+    padding: 10px 13px;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    font-size: 12px;
+}
+
+.error-notice { color: #a34141; background: rgba(196, 73, 73, .08); border: 1px solid rgba(196, 73, 73, .2); }
+.inline-warning { color: #8a5b00; background: #fff6db; border: 1px solid #f2d993; }
+.operation-status { font-size: 12px; opacity: .62; }
+.bridge-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.bridge-metrics div { display: grid; gap: 5px; padding: 12px; border-radius: 10px; background: rgba(128, 128, 128, .06); }
+.bridge-metrics span, .field-hint { font-size: 12px; opacity: .58; }
+.bridge-metrics strong { font-size: 14px; }
+.owner-card .section-title { align-items: flex-start; }
+.claim-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 10px; margin-top: 10px; border-top: 1px solid rgba(128,128,128,.12); font-size: 12px; }
+.advanced-config { margin-bottom: 12px; }
+.advanced-config summary { cursor: pointer; padding: 8px 2px 10px; font-size: 12px; opacity: .65; }
+.advanced-config .card { margin-bottom: 0; }
+
 .info-notice { background: rgba(56, 120, 199, .08); color: #3269a8; border-color: rgba(56, 120, 199, .18); }
 .loading-strip { display:flex; align-items:center; gap:9px; border:1px solid rgba(128,128,128,.12); border-radius:12px; padding:11px 14px; margin-bottom:12px; font-size:12px; opacity:.7; }
 .spinner { width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation: spin .8s linear infinite; }
@@ -405,7 +426,14 @@ a {
 .register-code-card { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .register-code-card h2 { margin: 0 0 6px; font: 700 14px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .register-code-card p { margin: 0; font-size: 12px; max-width: 560px; }
-.register-code-card input { flex: 0 1 360px; min-width: 220px; border: 1px solid rgba(128,128,128,.2); border-radius: 9px; padding: 9px 11px; background: rgba(255,255,255,.5); color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.register-code-input { display: flex; flex: 0 1 420px; gap: 8px; }
+.register-code-card input { flex: 1; min-width: 220px; border: 1px solid rgba(128,128,128,.2); border-radius: 9px; padding: 9px 11px; background: rgba(255,255,255,.5); color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.command-list { display: grid; }
+.command-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid rgba(128,128,128,.12); }
+.command-row:first-child { border-top: 0; padding-top: 0; }
+.command-row > div { display: grid; gap: 5px; min-width: 0; }
+.command-row code { width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.command-row span { font-size: 12px; opacity: .62; }
 
 .error-card {
     color: #a34141;
@@ -583,7 +611,32 @@ a {
     border-radius: 10px;
     padding: 10px;
     margin-bottom: 5px;
+    flex-direction: row;
+    align-items: stretch;
+    cursor: default;
+}
+
+.log-file-select {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
     cursor: pointer;
+    padding: 0;
+}
+
+.log-file-select strong,
+.log-file-select span {
+    display: block;
+}
+
+.log-delete {
+    align-self: center;
+    margin-left: 6px;
+    padding: 4px 7px;
+    font-size: 11px;
 }
 
 .log-file span {
@@ -710,6 +763,11 @@ a {
 @media (max-width:760px) {
     .app-shell { height: auto; min-height: 100vh; overflow: visible; display: block; }
     .main-shell { height: auto; min-height: 0; overflow: visible; }
+    .bridge-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .register-code-card { display: block; }
+    .register-code-input { width: 100%; margin-top: 12px; }
+    .register-code-card input { width: 100%; min-width: 0; }
+    .claim-row { align-items: flex-start; }
     .sidebar {
         display: none;
     }

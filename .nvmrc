@@ -1,1 +1,31 @@
-22
+# login: qq-bot
+mysql:
+  database: xiuxian_release
+  host: 81.70.255.37
+  password: Mm002580!
+  port: 13306
+  user: root
+port: '17177'
+qq-bot:
+  app_id: '102062268'
+  secret: AsbK4oZK6sfSG4tiYOF6zsmgbXTQNLKJ
+onebot:
+  url: 'ws://1.95.85.178:3001'
+  token: 'xianyu'
+redis:
+  db: 6
+  host: 81.70.255.37
+  port: 16379
+  user: root
+serverPort: 18110
+alemonjs-load-yunzai:
+  user_key:
+    - 1svbp7f
+    - 1e29alb
+    - 53xo4x
+    - 1823kog
+    - 12gosfa
+    - byr9av
+master_key:
+  - 1svbp7f
+  - 1h5u4fi

@@ -2,7 +2,7 @@ import { logger } from 'alemonjs'
 import { ChildProcess, execFile, spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, statfsSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
   getAutoStart,
   getBotID,
@@ -78,6 +78,11 @@ export type GSCoreLogs = {
 
 export type GSCoreConfigData = Record<string, unknown>
 export type GSCoreMessageHandler = (reply: MessageSend, context?: PendingContext) => Promise<void>
+export type CoreCommandPrefix = {
+  available: boolean
+  prefix: string
+  required: boolean
+}
 
 function run(command: string, args: string[], options: { cwd?: string; timeout?: number } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -540,8 +545,9 @@ export class GSCoreManager {
     this.refreshTask = (async () => {
       try {
         if (getTransport() === 'websocket') {
-          this.adapter.start()
-          this.reachable = this.adapter.state.connected
+          // 启动就绪不能只触发一次异步连接后马上读取状态；那会在握手尚未完成时
+          // 把已正常启动的 GsCore 误判为超时。这里等待本次握手的实际结果。
+          this.reachable = await this.adapter.connect()
         } else {
           const response = await request('/app')
           this.reachable = response.ok || response.status === 302
@@ -618,6 +624,16 @@ export class GSCoreManager {
     return { files, activeFile, content: truncated ? lines.slice(-maxLines).join('\n') : lines.join('\n'), truncated }
   }
 
+  deleteLog(fileName: string): GSCoreLogs {
+    const name = fileName.trim()
+    if (!name.endsWith('.log') || basename(name) !== name) throw new Error('只能删除 GsCore 日志目录中的 .log 文件')
+    if (this.localLogFile && basename(this.localLogFile) === name) throw new Error('当前正在写入的日志不能删除')
+    const path = join(getGSCoreLogsDir(), name)
+    if (!existsSync(path)) throw new Error('指定日志不存在或已被删除')
+    rmSync(path, { force: false })
+    return this.logs()
+  }
+
   getConfig(): GSCoreConfigData {
     const path = join(getDataDir(), 'config.json')
     if (!existsSync(path)) return {}
@@ -627,6 +643,22 @@ export class GSCoreManager {
       return config as GSCoreConfigData
     } catch (error) {
       throw new Error(`GsCore 配置无效：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  getCoreCommandPrefix(): CoreCommandPrefix {
+    const path = join(getDataDir(), 'plugins_configs', 'core_command.json')
+    if (!existsSync(path)) return { available: false, prefix: '', required: false }
+    try {
+      const config = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+      const forcePrefixes = Array.isArray(config.force_prefix)
+        ? config.force_prefix.map(value => String(value).trim()).filter(Boolean)
+        : []
+      const required = config.disable_force_prefix !== true && forcePrefixes.length > 0
+      return { available: true, prefix: required ? forcePrefixes[0] : '', required }
+    } catch (error) {
+      logger.warn(`[GsCore] 无法读取 core_command 指令前缀：${error instanceof Error ? error.message : String(error)}`)
+      return { available: false, prefix: '', required: false }
     }
   }
 
@@ -666,20 +698,23 @@ export class GSCoreManager {
   }
 
   async addMaster(userId: string): Promise<void> {
-    await this.withinTask('添加 GsCore 主人', async () => {
-      if (getRuntimeMode() === 'external') throw new Error('external 模式请在外部 GsCore 的 data/config.json 中添加 masters')
-      if (getRuntimeMode() === 'local' && !this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
-      const normalized = userId.trim()
-      if (!normalized) throw new Error('UserId 不能为空')
-      const config = this.getConfig()
-      const masters = Array.isArray(config.masters)
-        ? config.masters.map(value => String(value).trim()).filter(Boolean)
-        : []
-      if (!masters.includes(normalized)) masters.push(normalized)
-      config.masters = masters
-      this.writeConfig(config)
-      await this.restartAfterConfigChange()
-    })
+    if (getRuntimeMode() === 'external') throw new Error('external 模式请在外部 GsCore 的 data/config.json 中添加 masters')
+    if (getRuntimeMode() === 'local' && !this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
+    const normalized = userId.trim()
+    if (!normalized) throw new Error('UserId 不能为空')
+    const config = this.getConfig()
+    const masters = Array.isArray(config.masters)
+      ? config.masters.map(value => String(value).trim()).filter(Boolean)
+      : []
+    if (!masters.includes(normalized)) masters.push(normalized)
+    config.masters = masters
+    this.writeConfig(config)
+
+    // 认领是配置写入操作，不能被“GsCore 正在启动/停止”这一类管理任务拦住。
+    // 若当前没有管理任务且 GsCore 由插件托管运行，仍自动重启以立即应用权限；
+    // 否则只保存，正在启动的实例或下一次启动会读取新的 masters。
+    if (!this.task) await this.restartAfterConfigChange()
+    else logger.info(`[GsCore] 已写入 masters；当前正在${this.task}，将由本次或下次启动加载新配置`)
   }
 
   async install(): Promise<void> {

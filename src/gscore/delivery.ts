@@ -1,4 +1,4 @@
-import { Format, logger, sendToChannel, sendToUser, useMessage } from 'alemonjs'
+import { Format, ResultCode, logger, sendToChannel, sendToUser, useMessage } from 'alemonjs'
 import type { GSCoreMessage, MessageSend } from './types'
 
 function append(format: InstanceType<typeof Format>, item: GSCoreMessage): void {
@@ -27,23 +27,48 @@ function toFormat(content: GSCoreMessage[]): InstanceType<typeof Format> {
   return format
 }
 
+function sent(results: unknown): boolean {
+  return Array.isArray(results) && results.some(result =>
+    result && typeof result === 'object' && (result as { code?: number }).code === ResultCode.Ok)
+}
+
+async function replyToSourceEvent(event: Parameters<typeof useMessage>[0], format: InstanceType<typeof Format>): Promise<void> {
+  const [message] = useMessage(event)
+  await message.send({ format })
+}
+
 export async function deliver(reply: MessageSend, event?: Parameters<typeof useMessage>[0]): Promise<void> {
   const format = toFormat(reply.content ?? [])
   if (!format.value.length) return
   const targetID = String(reply.target_id ?? '')
   const targetType = String(reply.target_type ?? '')
   if ((targetType === 'direct' || targetType === 'private') && targetID) {
-    await sendToUser(targetID, format.value)
+    const results = await sendToUser(targetID, format.value)
+    if (sent(results)) return
+    // QQ C2C 主动发送要求带平台目标类型；有入站关联时使用原事件回复，
+    // 由平台适配器自动选择正确的 C2C/私信通道。
+    if (event) {
+      logger.debug('[GsCore] 主动私聊发送未返回成功结果，已回退为关联事件回复')
+      await replyToSourceEvent(event, format)
+      return
+    }
+    logger.warn('[GsCore] 私聊主动消息未返回成功结果，缺少关联入站消息，无法安全回退')
     return
   }
   if (targetID && targetType) {
-    await sendToChannel(targetID, format.value)
+    const results = await sendToChannel(targetID, format.value)
+    if (sent(results)) return
+    if (event) {
+      logger.debug('[GsCore] 主动频道发送未返回成功结果，已回退为关联事件回复')
+      await replyToSourceEvent(event, format)
+      return
+    }
+    logger.warn('[GsCore] 频道主动消息未返回成功结果，缺少关联入站消息，无法安全回退')
     return
   }
   if (!event) {
     logger.warn('[GsCore] 主动消息缺少 target_type/target_id，且未找到对应入站消息，已丢弃')
     return
   }
-  const [message] = useMessage(event)
-  await message.send({ format })
+  await replyToSourceEvent(event, format)
 }

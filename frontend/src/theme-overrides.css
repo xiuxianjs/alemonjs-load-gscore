@@ -12,6 +12,8 @@
 [data-theme='dark'] .token input, [data-theme='dark'] .form-row input, [data-theme='dark'] .config-card textarea, [data-theme='dark'] .register-code-card input { background: rgba(0,0,0,.18); border-color: rgba(255,255,255,.14); color: inherit; }
 [data-theme='dark'] .mobile-brand { border-color: rgba(255,255,255,.08); }
 [data-theme='dark'] .info-notice { color: #9fc5ef; background: rgba(56,120,199,.15); border-color: rgba(93,157,225,.25); }
+[data-theme='dark'] .error-notice { color: #f0a6a6; background: rgba(196,73,73,.14); border-color: rgba(240,166,166,.24); }
+[data-theme='dark'] .inline-warning { color: #f0c66f; background: rgba(138,91,0,.16); border-color: rgba(242,217,147,.24); }
 [data-theme='dark'] .console-webview { background: #111; }
 [data-theme='dark'], [data-theme='dark'] * { scrollbar-color: rgba(255,255,255,.28) transparent; }
 [data-theme='dark'] *::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); background-clip: padding-box; }
@@ -28,5 +30,6 @@
     .section-title { flex-wrap: wrap; }
     .top-actions { margin-left: auto; }
     .register-code-card { display: block; }
-    .register-code-card input { width: 100%; min-width: 0; margin-top: 12px; }
+    .register-code-input { width: 100%; margin-top: 12px; }
+    .register-code-card input { width: 100%; min-width: 0; }
 }
