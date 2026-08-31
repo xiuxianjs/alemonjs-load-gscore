@@ -1,11 +1,11 @@
-import { logger, useMessage } from 'alemonjs'
+import { logger, EventsEnum } from 'alemonjs'
 import type { Next } from 'alemonjs'
 import { getBotID } from '../path'
 import { deliver } from './delivery'
 import { manager } from './manager'
 import { toMessageReceive } from './protocol'
 
-export default async (event: Parameters<typeof useMessage>[0], next: Next) => {
+export default async (event: EventsEnum, next: Next) => {
   try {
     const message = toMessageReceive(event, getBotID())
     if (manager.transport === 'websocket') {
