@@ -1,5 +1,6 @@
 import bodyParser from 'koa-bodyparser'
 import KoaRouter from 'koa-router'
+import { createHash } from 'node:crypto'
 import { backgroundActions, runGSCoreAction, runGSCoreActionInBackground } from './gscore/control'
 import { isGSCoreAction } from './gscore/actions'
 import { getApiToken, getGSCoreURL, setTransport, type TransportMode } from './path'
@@ -8,6 +9,85 @@ import { getOwnerClaimState, startOwnerClaimWindow } from './gscore/owner-claim'
 
 const apiRouter = new KoaRouter({ prefix: '/api/gscore' })
 apiRouter.use(bodyParser())
+
+type ConsoleAuthDiagnostic = {
+  at: number
+  path: string
+  status: number
+  hadAuthorization: boolean
+}
+
+type ConsoleAuthCheck = {
+  reachable: boolean
+  mode: 'encrypted-bearer-session' | 'legacy-or-incompatible' | 'unavailable'
+  message: string
+}
+
+const consoleAuthDiagnostics: ConsoleAuthDiagnostic[] = []
+
+function recordConsoleAuthDiagnostic(targetPath: string, status: number, hadAuthorization: boolean): void {
+  if (!targetPath.startsWith('/api/auth/')) return
+  consoleAuthDiagnostics.unshift({ at: Date.now(), path: targetPath, status, hadAuthorization })
+  if (consoleAuthDiagnostics.length > 20) consoleAuthDiagnostics.length = 20
+}
+
+function summarizeConsoleAuthDiagnostics(): string {
+  const latest = consoleAuthDiagnostics.find(item => item.path === '/api/auth/me')
+  if (!latest) return '尚未观察到登录后的会话校验请求。请先在嵌入控制台完成一次登录，再读取诊断。'
+  if (latest.status === 401 && latest.hadAuthorization) return 'GsCore 收到了 Bearer 但拒绝了会话：通常是同账号新登录挤掉了旧会话，或会话已被服务端吊销。'
+  if (latest.status === 401) return '浏览器发起会话校验时未携带 Bearer：请检查是否被浏览器存储策略、旧页面脚本或页面刷新清除了令牌。'
+  if (latest.status >= 200 && latest.status < 300) return '最近一次登录后会话校验正常，认证链路没有发现 401。'
+  return `最近一次会话校验返回 HTTP ${latest.status}，请结合 GsCore 日志进一步定位。`
+}
+
+async function checkConsoleAuth(): Promise<ConsoleAuthCheck> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5_000)
+  try {
+    const response = await fetch(`${getGSCoreURL()}/api/auth/pubkey`, { signal: controller.signal })
+    if (!response.ok) return { reachable: true, mode: 'legacy-or-incompatible', message: `认证公钥端点返回 HTTP ${response.status}；该 GsCore 可能较旧或认证接口不兼容。` }
+    const body = await response.json().catch(() => null) as { status?: unknown; data?: { alg?: unknown } } | null
+    if (body?.status === 0 && body.data?.alg === 'x25519-aes256gcm') {
+      return { reachable: true, mode: 'encrypted-bearer-session', message: '已确认使用当前 GsCore 的加密登录 + Bearer 会话认证。' }
+    }
+    return { reachable: true, mode: 'legacy-or-incompatible', message: 'GsCore 可访问，但未返回当前认证协议标识；请检查 GsCore 与控制台版本是否匹配。' }
+  } catch (error) {
+    const reason = error instanceof Error && error.name === 'AbortError' ? '请求超时' : '无法连接'
+    return { reachable: false, mode: 'unavailable', message: `无法检查 GsCore 认证协议：${reason}。` }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function rewriteConsoleLocation(location: string): string {
+  try {
+    const upstream = new URL(location, getGSCoreURL())
+    if (upstream.origin !== new URL(getGSCoreURL()).origin) return location
+    const suffix = `${upstream.search}${upstream.hash}`
+    if (upstream.pathname === '/app' || upstream.pathname.startsWith('/app/')) {
+      const path = upstream.pathname.replace(/^\/app\/?/, '')
+      return `./${path}${suffix}`
+    }
+    if (upstream.pathname === '/api' || upstream.pathname.startsWith('/api/')) {
+      const path = upstream.pathname.replace(/^\/api\/?/, '')
+      return `../console-api/${path}${suffix}`
+    }
+  } catch {
+    // 无法解析的 Location 保持上游原值，避免改变非标准重定向的语义。
+  }
+  return location
+}
+
+function rewriteConsoleStorageKeys(content: string): string {
+  // 控制台嵌入在 AlemonJS 同源 iframe 内。GsCore 原生页面使用的通用 localStorage
+  // 键会与宿主或其他 GsCore 实例冲突，造成刚登录的令牌被覆盖后立即回到登录页。
+  const scope = createHash('sha256').update(getGSCoreURL()).digest('hex').slice(0, 16)
+  const prefix = `alemonjs-load-gscore:${scope}:`
+  return content
+    .replaceAll('"auth_token"', JSON.stringify(`${prefix}auth_token`))
+    .replaceAll('"auth_user"', JSON.stringify(`${prefix}auth_user`))
+    .replaceAll('"custom_api_host"', JSON.stringify(`${prefix}custom_api_host`))
+}
 
 async function proxyConsole(ctx: KoaRouter.RouterContext, targetPath: string): Promise<void> {
   const controller = new AbortController()
@@ -30,20 +110,24 @@ async function proxyConsole(ctx: KoaRouter.RouterContext, targetPath: string): P
     const upstreamContentType = upstream.headers.get('content-type')
     if (upstreamContentType) ctx.set('content-type', upstreamContentType)
     const location = upstream.headers.get('location')
-    if (location) ctx.set('location', location.replace(getGSCoreURL(), '').replace('/app', '/api/gscore/console'))
+    if (location) ctx.set('location', rewriteConsoleLocation(location))
     const setCookie = (upstream.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? []
     if (setCookie.length) ctx.set('set-cookie', setCookie.map(value => value.replace(/Path=\/app\b/gi, 'Path=/api/gscore/console').replace(/Path=\/\b/gi, 'Path=/api/gscore/console')))
     const data = Buffer.from(await upstream.arrayBuffer())
     if (upstreamContentType?.includes('text/html') || upstreamContentType?.includes('javascript') || upstreamContentType?.includes('text/css')) {
-      const rewritten = data.toString('utf8')
+      // GsCore 升级后必须同步加载新的控制台 bundle；旧 bundle 可能与新认证接口不兼容。
+      ctx.set('cache-control', 'no-store')
+      let rewritten = data.toString('utf8')
         .replaceAll('/app/', '__GSCORE_APP_PATH__')
         .replaceAll('/api/', '__GSCORE_API_PATH__')
         .replaceAll('__GSCORE_APP_PATH__', './')
         .replaceAll('__GSCORE_API_PATH__', '../console-api/')
+      if (upstreamContentType.includes('javascript')) rewritten = rewriteConsoleStorageKeys(rewritten)
       ctx.body = rewritten
     } else {
       ctx.body = data
     }
+    recordConsoleAuthDiagnostic(targetPath, upstream.status, Boolean(authorization))
   } catch (error) {
     ctx.status = 502
     ctx.body = { code: 502, message: error instanceof Error ? `GsCore 控制台不可用：${error.message}` : 'GsCore 控制台不可用' }
@@ -61,6 +145,28 @@ apiRouter.all('/console', async ctx => {
 apiRouter.all('/console/*path', async ctx => { const path = Array.isArray(ctx.params.path) ? ctx.params.path.join('/') : ctx.params.path ?? ''; await proxyConsole(ctx, `/app/${path}`) })
 apiRouter.all('/console-api', async ctx => { await proxyConsole(ctx, '/api/') })
 apiRouter.all('/console-api/*path', async ctx => { const path = Array.isArray(ctx.params.path) ? ctx.params.path.join('/') : ctx.params.path ?? ''; await proxyConsole(ctx, `/api/${path}`) })
+
+apiRouter.get('/console-diagnostics', async ctx => {
+  const token = getApiToken()
+  if (token && ctx.get('x-gscore-token') !== token) {
+    ctx.status = 401
+    ctx.body = { code: 401, message: '需要有效的 x-gscore-token', data: null }
+    return
+  }
+  ctx.status = 200
+  ctx.body = { code: 200, message: 'ok', data: { entries: consoleAuthDiagnostics, summary: summarizeConsoleAuthDiagnostics() } }
+})
+
+apiRouter.get('/console-auth-check', async ctx => {
+  const token = getApiToken()
+  if (token && ctx.get('x-gscore-token') !== token) {
+    ctx.status = 401
+    ctx.body = { code: 401, message: '需要有效的 x-gscore-token', data: null }
+    return
+  }
+  ctx.status = 200
+  ctx.body = { code: 200, message: 'ok', data: await checkConsoleAuth() }
+})
 
 apiRouter.get('/status', async ctx => {
   ctx.status = 200

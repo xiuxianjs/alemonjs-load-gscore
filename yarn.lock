@@ -2,10 +2,10 @@
 # yarn lockfile v1
 
 
-"@alemonjs/qq-bot@^2.1.33":
-  version "2.1.33"
-  resolved "https://registry.npmmirror.com/@alemonjs/qq-bot/-/qq-bot-2.1.33.tgz#8838ebe7a16a0445ab81b2adc4feb0ed0afe90fc"
-  integrity sha512-SRDbFK96cTeKu3qiAewMyQdthOss3QZGO4tX/N58bQVlP5P7T+zusZFUV3FXDVPS99IDqrRCLE2LVC22ElLarQ==
+"@alemonjs/qq-bot@^2.1.34":
+  version "2.1.34"
+  resolved "https://registry.npmmirror.com/@alemonjs/qq-bot/-/qq-bot-2.1.34.tgz#ecba687f7a98e527e40501312deecbb2f63c3da0"
+  integrity sha512-u6Zxu52R04OIt4Y/9uHi0XsGdze9Nj3SMtWqkBofGVGmTZ/s91kC9IhppLnyFhrE1XzEelis+wcHRxHhI6+wqA==
   dependencies:
     "@noble/curves" "^1.7.0"
     axios "^1.4.0"
@@ -21,6 +21,7 @@
     qrcode "^1.5.3"
     uuid "^14.0.1"
     ws "^8.13.0"
+    yaml "^2.5.1"
 
 "@borewit/text-codec@^0.2.1":
   version "0.2.2"
@@ -942,10 +943,10 @@ ajv@^6.14.0:
     json-schema-traverse "^0.4.1"
     uri-js "^4.2.2"
 
-alemonjs@^2.1.97:
-  version "2.1.97"
-  resolved "https://registry.npmmirror.com/alemonjs/-/alemonjs-2.1.97.tgz#6cea2487135a0cb9ee03c342ec1af46c4bd4007a"
-  integrity sha512-TPefOkJ+dn5UvoC8zLoNCGK/29Eg+iWgQ12Cq2qqrkk9MTSYLtXERTPNTqx2t47ASyD4N/X+mZMRJcvEI+lNAw==
+alemonjs@^2.1.98:
+  version "2.1.98"
+  resolved "https://registry.npmmirror.com/alemonjs/-/alemonjs-2.1.98.tgz#06d91bf2bb788ac0f9fe356a2b167605b8106336"
+  integrity sha512-BEyzw9qfyhhrrbVVoBjxMksb/FUCnEuU7WzkIc+PQI5YOZnqcroxscenfC0D0Sv3vYPfVEJv+SI9tw4W08ZQqw==
   dependencies:
     "@koa/cors" "^5.0.0"
     axios "^1.14.0"

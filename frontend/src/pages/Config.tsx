@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { addOwnerClaim, getApiToken, getConfig, getOwnerClaims, getStatus, saveConfig, setApiToken, setTransport, startOwnerClaim } from '../api/web-api'
-import type { OwnerClaim } from '../types'
+import { addOwnerClaim, checkConsoleAuth, getApiToken, getConfig, getConsoleDiagnostics, getOwnerClaims, getStatus, saveConfig, setApiToken, setTransport, startOwnerClaim } from '../api/web-api'
+import type { ConsoleAuthCheck, ConsoleAuthDiagnostic, OwnerClaim } from '../types'
 
 function errorText(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
@@ -18,10 +18,15 @@ export default function Config() {
   const [ownerClaims, setOwnerClaims] = useState<OwnerClaim[]>([])
   const [ownerClaimUntil, setOwnerClaimUntil] = useState<number | null>(null)
   const [registerCopied, setRegisterCopied] = useState(false)
+  const [webMaxSessions, setWebMaxSessions] = useState('1')
+  const [consoleDiagnostics, setConsoleDiagnostics] = useState<ConsoleAuthDiagnostic[]>([])
+  const [consoleDiagnosticSummary, setConsoleDiagnosticSummary] = useState('')
+  const [consoleAuthCheck, setConsoleAuthCheck] = useState<ConsoleAuthCheck | null>(null)
 
   const applyConfig = (config: Record<string, unknown>) => {
     setText(JSON.stringify(config, null, 2))
     setRegisterCode(typeof config.REGISTER_CODE === 'string' ? config.REGISTER_CODE : '')
+    setWebMaxSessions(String(typeof config.web_max_sessions === 'number' ? config.web_max_sessions : 1))
   }
 
   const handleTextChange = (value: string) => {
@@ -86,6 +91,31 @@ export default function Config() {
     finally { setLoading('') }
   }
 
+  const saveWebMaxSessions = async () => {
+    const value = Number(webMaxSessions)
+    if (!Number.isInteger(value) || value < 1 || value > 100) { setNotice('在线会话数必须是 1 到 100 的整数'); return }
+    try {
+      const config = JSON.parse(text) as Record<string, unknown>
+      config.web_max_sessions = value
+      setText(JSON.stringify(config, null, 2))
+      setLoading('web-max-sessions')
+      await saveConfig(config)
+      setNotice(value === 1 ? '已启用单点登录，其他设备重新登录会使当前会话失效。' : `已允许同账号最多 ${value} 个并发会话；配置已保存并将在重启后生效。`)
+    } catch (error) { setNotice(errorText(error)) } finally { setLoading('') }
+  }
+
+  const loadConsoleDiagnostics = async () => {
+    setLoading('console-diagnostics')
+    try { const data = await getConsoleDiagnostics(); setConsoleDiagnostics(data.entries); setConsoleDiagnosticSummary(data.summary) }
+    catch (error) { setNotice(errorText(error)) } finally { setLoading('') }
+  }
+
+  const runConsoleAuthCheck = async () => {
+    setLoading('console-auth-check')
+    try { setConsoleAuthCheck(await checkConsoleAuth()) }
+    catch (error) { setNotice(errorText(error)) } finally { setLoading('') }
+  }
+
   const addMaster = async (claim: OwnerClaim) => {
     setLoading(`master:${claim.userId}`)
     try { await addOwnerClaim(claim.userId); applyConfig(await getConfig()); setOwnerClaims(current => current.filter(item => item.userId !== claim.userId)); setNotice('已添加为 GsCore 主人') }
@@ -109,6 +139,10 @@ export default function Config() {
     </section>
 
     <section className="card register-code-card"><div><h2>REGISTER_CODE</h2><p className="field-hint">首次注册 WebConsole 管理员时使用</p></div><div className="register-code-input"><input aria-label="REGISTER_CODE" type="password" value={registerCode} onChange={event => { setRegisterCopied(false); updateRegisterCode(event.target.value) }} placeholder="未设置" /><button className="button" type="button" disabled={!registerCode} onClick={() => void copyRegisterCode()}>{registerCopied ? '已复制' : '复制'}</button></div></section>
+
+    <section className="card register-code-card"><div><h2>控制台在线会话</h2><p className="field-hint">建议至少设为 3。值为 1 时，同账号在另一处登录会使当前页面回到登录页。</p></div><div className="register-code-input"><input aria-label="同账号最大在线会话数" inputMode="numeric" value={webMaxSessions} onChange={event => setWebMaxSessions(event.target.value)} /><button className="button primary" type="button" disabled={Boolean(loading) || !text.trim()} onClick={() => void saveWebMaxSessions()}>{loading === 'web-max-sessions' ? '保存中…' : '保存并应用'}</button></div></section>
+
+    <section className="card"><div className="section-title"><div><h2>控制台认证诊断</h2><p className="field-hint">只读检测协议与认证状态；不记录密码或令牌。</p></div><div className="action-row top-actions"><button className="button" type="button" disabled={Boolean(loading)} onClick={() => void runConsoleAuthCheck()}>{loading === 'console-auth-check' ? '检查中…' : '检查兼容性'}</button><button className="button" type="button" disabled={Boolean(loading)} onClick={() => void loadConsoleDiagnostics()}>{loading === 'console-diagnostics' ? '读取中…' : '读取诊断'}</button></div></div>{consoleAuthCheck && <div className="claim-row"><span className="muted">协议自检：{consoleAuthCheck.message}</span></div>}{consoleDiagnosticSummary && <div className="claim-row"><span className="muted">会话结论：{consoleDiagnosticSummary}</span></div>}{consoleDiagnostics.length > 0 && <div className="claim-row"><span className="muted">最近请求：{consoleDiagnostics[0].path} · HTTP {consoleDiagnostics[0].status} · {consoleDiagnostics[0].hadAuthorization ? '已携带 Bearer' : '未携带 Bearer'}</span></div>}</section>
 
     <section className="card owner-card"><div className="section-title"><div><h2>GsCore 主人</h2><p className="field-hint">用于执行受保护的管理指令</p></div><button className="button primary" type="button" disabled={Boolean(loading)} onClick={() => void beginOwnerClaim()}>{loading === 'owner-claim' ? '开启中…' : ownerClaimUntil ? '认领中' : '开启认领'}</button></div>
       {ownerClaimUntil && <div className="claim-row"><span className="muted">等待私聊“/我是主人” · 截止 {new Date(ownerClaimUntil).toLocaleTimeString()}</span></div>}

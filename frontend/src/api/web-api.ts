@@ -1,4 +1,4 @@
-import type { CoreCommandPrefix, GSCoreLogs, GSCoreStatus, OwnerClaimState } from '../types'
+import type { ConsoleAuthCheck, ConsoleDiagnostics, CoreCommandPrefix, GSCoreLogs, GSCoreStatus, OwnerClaimState } from '../types'
 
 type ApiResponse<T> = { code?: number; message?: string; data?: T }
 
@@ -66,6 +66,14 @@ export async function getCoreCommandPrefix(): Promise<CoreCommandPrefix> {
   const body = await response.json().catch(() => ({})) as ApiResponse<CoreCommandPrefix>
   if (!response.ok || body.code !== 200) throw new Error(body.message || `请求失败 (${response.status})`)
   return body.data ?? { available: false, prefix: '', required: false }
+}
+
+export function getConsoleDiagnostics(): Promise<ConsoleDiagnostics> {
+  return request<ConsoleDiagnostics>('./api/gscore/console-diagnostics')
+}
+
+export function checkConsoleAuth(): Promise<ConsoleAuthCheck> {
+  return request<ConsoleAuthCheck>('./api/gscore/console-auth-check')
 }
 
 export async function saveConfig(config: Record<string, unknown>): Promise<GSCoreStatus> {

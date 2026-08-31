@@ -54,3 +54,21 @@ export type CoreCommandPrefix = {
   prefix: string
   required: boolean
 }
+
+export type ConsoleAuthDiagnostic = {
+  at: number
+  path: string
+  status: number
+  hadAuthorization: boolean
+}
+
+export type ConsoleDiagnostics = {
+  entries: ConsoleAuthDiagnostic[]
+  summary: string
+}
+
+export type ConsoleAuthCheck = {
+  reachable: boolean
+  mode: 'encrypted-bearer-session' | 'legacy-or-incompatible' | 'unavailable'
+  message: string
+}
