@@ -4,7 +4,7 @@ import { type GSCoreAction } from './actions'
 export type { GSCoreAction } from './actions'
 
 export const backgroundActions: GSCoreAction[] = [
-  'install', 'save-config', 'start', 'stop', 'restart', 'enable-http',
+  'install', 'save-config', 'start', 'stop', 'restart', 'enable-http', 'upgrade-deps',
   'install-plugin', 'update-plugin', 'remove-plugin'
 ]
 
@@ -19,6 +19,7 @@ export async function runGSCoreAction(action: GSCoreAction, payload: Record<stri
     case 'stop': await manager.stop(); return manager.status()
     case 'restart': await manager.restart(); return manager.status()
     case 'enable-http': await manager.enableHTTP(); return manager.status()
+    case 'upgrade-deps': await manager.upgradeDependencies(); return manager.status()
     case 'install-plugin':
       await manager.installPlugin(String(payload.repository ?? ''))
       return manager.status()

@@ -20,6 +20,8 @@ export default function Manage() {
   const [notice, setNotice] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [action, setAction] = useState('')
+  const [depsUpgrading, setDepsUpgrading] = useState(false)
+  const [depsNotice, setDepsNotice] = useState('')
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -29,6 +31,18 @@ export default function Manage() {
   }, [])
 
   useEffect(() => subscribeStatus(setStatus, error => setNotice(errorText(error))), [])
+
+  const upgradeDependencies = async () => {
+    if (depsUpgrading) return
+    setDepsNotice('')
+    setDepsUpgrading(true)
+    try {
+      // 阶段文案直接读 subscribeStatus 刷新的 status.task.phase，不再额外轮询
+      const next = await runAction('upgrade-deps')
+      setDepsNotice(next.running ? '依赖已同步，重启 GsCore 后生效' : '依赖已同步')
+    } catch (error) { setDepsNotice(errorText(error)) }
+    finally { setDepsUpgrading(false) }
+  }
 
   const execute = async (name: string) => {
     if (action) return
@@ -42,6 +56,8 @@ export default function Manage() {
   const localMode = status?.mode === 'local'
   const externalProcess = status?.processOwner === 'external'
   const locked = Boolean(action) || !localMode || externalProcess
+  // 其它任务（安装/启停/插件）在跑时不能并发升级依赖：后端也会返回 409
+  const busyElsewhere = Boolean(status?.busy) && !depsUpgrading
   const label = runtimeLabel(status)
 
   return <div className="manage page-body">
@@ -65,6 +81,13 @@ export default function Manage() {
         {status?.installed && <button className="button" type="button" disabled={locked} onClick={() => void execute('restart')}>重启</button>}
       </div></div>
       <div className="operation-status">{action ? `正在${action}…` : status?.busyTask ? `正在${status.busyTask}：${status.task?.phase ?? '处理中'}…` : `PID ${status?.pid ?? '—'} · ${status?.processOwner === 'plugin' ? '插件托管' : externalProcess ? '外部托管' : '未运行'}`}</div>
+    </section>
+
+    <section className="card">
+      <div className="section-title"><div><h2>依赖</h2><p className="field-hint">按 GsCore 源码里的依赖声明重新同步 Python 环境；外部托管时也能用，升级后需重启 GsCore 生效。</p></div><button className="button primary" type="button" disabled={depsUpgrading || busyElsewhere} onClick={() => void upgradeDependencies()}>{depsUpgrading ? '升级中…' : '一键升级'}</button></div>
+      {depsUpgrading && <div className="claim-row"><span className="muted">{status?.task?.phase || '正在同步依赖，可能需要几分钟…'}</span></div>}
+      {!depsUpgrading && busyElsewhere && <div className="claim-row"><span className="muted">正在{status?.busyTask ?? '执行其他操作'}，完成后可升级依赖。</span></div>}
+      {!depsUpgrading && !busyElsewhere && depsNotice && <div className="claim-row"><span className="muted">{depsNotice}</span></div>}
     </section>
 
     <section className="card">

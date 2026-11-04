@@ -764,6 +764,19 @@ export class GSCoreManager {
     })
   }
 
+  async upgradeDependencies(): Promise<void> {
+    await this.withinTask('升级依赖', async () => {
+      if (getRuntimeMode() === 'docker') throw new Error('Docker 模式请在镜像内更新依赖')
+      if (!this.localInstalled()) throw new Error('未找到 GsCore 源码目录，无法升级依赖')
+      this.setTaskPhase('同步 Python 依赖（可能需要几分钟）')
+      // 进程在跑时替换已加载的 .pyd/.dll 会失败（Windows 文件占用），提前把话说明白
+      if (await this.serviceReachable()) {
+        logger.warn('[GsCore] GsCore 正在运行，若升级提示文件被占用，请先停止 GsCore 后重试')
+      }
+      await this.prepareLocalDependencies()
+    })
+  }
+
   private async checkLocalInstallEnvironment(): Promise<void> {
     if (!/^(?:https?:\/\/|git@)/i.test(getGSCoreRepo())) throw new Error('GsCore 仓库必须是 HTTP(S) 或 git@ 地址')
     if (!(await this.commandAvailable('git'))) throw new Error('未找到 Git，请先安装 Git')
