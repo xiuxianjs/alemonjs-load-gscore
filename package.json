@@ -102,10 +102,20 @@
   "license": "",
   "main": "./lib/index.js",
   "name": "alemonjs-load-gscore",
-  "packageManager": "yarn@1.22.22",
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "app": "node index.js",
+    "build:frontend": "yarn --cwd frontend build",
+    "build:runtime": "lvy build",
+    "dev": "lvy app.ts --serverPort 17188",
+    "dev-fe": "yarn --cwd frontend dev",
+    "install:frontend": "yarn --cwd frontend install",
+    "lint": "eslint src --ext .ts --max-warnings=0",
+    "test": "yarn build && node --test tests/*.test.mjs"
+  },
   "type": "module",
-  "version": "0.0.4"
+  "version": "0.0.5",
+  "gitHead": "ac611819156673b70b81c82a337ce4e24235037f"
 }
