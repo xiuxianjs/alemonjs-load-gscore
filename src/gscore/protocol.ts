@@ -14,13 +14,29 @@ type AlemonEvent = {
   IsMaster?: boolean
 }
 
+function fileNameOf(url: string): string {
+  const path = url.split(/[?#]/)[0] ?? ''
+  const name = path.split('/').pop() ?? ''
+  try {
+    return decodeURIComponent(name)
+  } catch {
+    return name
+  }
+}
+
 export function toMessageReceive(event: AlemonEvent, botID: string): MessageReceive {
   const content: MessageReceive['content'] = []
   if (event.MessageText) content.push({ type: 'text', data: event.MessageText })
   for (const media of event.MessageMedia ?? []) {
     if (!media.Url) continue
     const type = media.Type?.toLowerCase()
-    if (type === 'image' || type === 'audio' || type === 'record' || type === 'video' || type === 'file') {
+    // GsCore 的 file 段按「文件名|链接」字符串解析，发对象会直接把入站处理打成
+    // AttributeError（'dict' object has no attribute 'split'），整条消息被丢弃。
+    if (type === 'file') {
+      content.push({ type: 'file', data: `${fileNameOf(media.Url)}|${media.Url}` })
+      continue
+    }
+    if (type === 'image' || type === 'audio' || type === 'record' || type === 'video') {
       content.push({
         type: type === 'record' ? 'audio' : type,
         data: { type: 'url', content: media.Url }

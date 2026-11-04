@@ -31,7 +31,7 @@ test('converts supported media types and ignores unsupported media', () => {
   assert.deepEqual(result.content, [
     { type: 'audio', data: { type: 'url', content: 'https://example.com/a.mp3' } },
     { type: 'video', data: { type: 'url', content: 'https://example.com/a.mp4' } },
-    { type: 'file', data: { type: 'url', content: 'https://example.com/a.zip' } }
+    { type: 'file', data: 'a.zip|https://example.com/a.zip' }
   ])
 })
 
@@ -42,4 +42,14 @@ test('preserves AlemonJS channel id for GsCore channel replies', () => {
 
   assert.equal(result.user_type, 'group')
   assert.equal(result.group_id, 'channel-9')
+})
+
+test('flattens file media into the name|url form GsCore parses', () => {
+  const result = toMessageReceive({
+    MessageMedia: [{ Type: 'file', Url: 'https://example.com/dir/%E6%B5%8B%E8%AF%95.zip?sign=abc' }]
+  }, 'AlemonJS')
+
+  assert.deepEqual(result.content, [
+    { type: 'file', data: '测试.zip|https://example.com/dir/%E6%B5%8B%E8%AF%95.zip?sign=abc' }
+  ])
 })

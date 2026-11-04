@@ -2,6 +2,7 @@ import { logger } from 'alemonjs'
 import { ChildProcess, execFile, spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, statfsSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import {
   getAutoStart,
@@ -108,6 +109,7 @@ async function request(path: string, init?: RequestInit, timeoutMs = 5_000): Pro
 
 export class GSCoreManager {
   private static readonly REFRESH_INTERVAL = 3000
+  private static readonly ADOPT_INTERVAL = 60_000
   private task: string | null = null
   private taskState: TaskState | null = null
   private reachable = false
@@ -120,6 +122,7 @@ export class GSCoreManager {
   private localStopRequested = false
   private localRestartCount = 0
   private localRestartTimer: ReturnType<typeof setTimeout> | null = null
+  private lastAdoptAt = 0
   private messageHandler: GSCoreMessageHandler | null = null
   private readonly adapter: GSCoreWebSocketAdapter
 
@@ -279,6 +282,67 @@ export class GSCoreManager {
     return state.pid
   }
 
+  private async listeningPID(port: number): Promise<number | null> {
+    try {
+      if (process.platform === 'win32') {
+        const output = await run('netstat', ['-ano', '-p', 'TCP'], { timeout: 15_000 })
+        for (const line of output.split(/\r?\n/)) {
+          const fields = line.trim().split(/\s+/)
+          if (fields.length < 5 || fields[3] !== 'LISTENING') continue
+          const local = fields[1] ?? ''
+          const index = local.lastIndexOf(':')
+          if (index < 0 || Number(local.slice(index + 1)) !== port) continue
+          const pid = Number(fields[4])
+          if (Number.isInteger(pid) && pid > 0) return pid
+        }
+        return null
+      }
+      const output = await run('ss', ['-lptnH'], { timeout: 15_000 })
+      for (const line of output.split(/\r?\n/)) {
+        if (!line.includes(`:${port} `) && !line.includes(`:${port}\t`)) continue
+        const match = /pid=(\d+)/.exec(line)
+        if (match) return Number(match[1])
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  private async processCommandLine(pid: number): Promise<string> {
+    try {
+      if (process.platform === 'win32') {
+        const script = `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`
+        const output = await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: 20_000 })
+        // PowerShell 会按控制台宽度折行输出，命令行可能被插入换行，需去掉所有空白再比对。
+        return output.replace(/\s+/g, '')
+      }
+      return (await run('ps', ['-p', String(pid), '-o', 'command='], { timeout: 10_000 })).replace(/\s+/g, '')
+    } catch {
+      return ''
+    }
+  }
+
+  // 宿主重启后 .managed-process.json 可能已随旧 PID 一起被清理，而 GsCore 仍在运行。
+  // 这种情况下按监听端口反查进程，确认命令行确实是 gsuid_core.core 后重新写入所有权记录，
+  // 否则停止/重启会一直报「不是本插件启动的进程」。
+  private async adoptRunningProcess(force = false): Promise<number | null> {
+    if (getRuntimeMode() !== 'local') return null
+    if (!force && Date.now() - this.lastAdoptAt < GSCoreManager.ADOPT_INTERVAL) return null
+    this.lastAdoptAt = Date.now()
+    if (!(await this.serviceReachable())) return null
+    const pid = await this.listeningPID(getPort())
+    if (!pid) return null
+    const commandLine = await this.processCommandLine(pid)
+    if (!commandLine.includes('gsuid_core.core')) {
+      logger.debug(`[GsCore] 端口 ${getPort()} 由 PID ${pid} 占用，命令行不匹配 GsCore，跳过认领`)
+      return null
+    }
+    await this.persistManagedProcess(pid)
+    logger.info(`[GsCore] 已认领运行中的 GsCore 进程 PID ${pid}`)
+    return pid
+  }
+
   private persistTaskState(): void {
     if (!this.taskState) return
     try {
@@ -330,6 +394,18 @@ export class GSCoreManager {
     }
   }
 
+  private async uvCommand(): Promise<string | null> {
+    if (await this.commandAvailable('uv')) return 'uv'
+    const home = homedir()
+    const candidates = process.platform === 'win32'
+      ? [join(home, '.local', 'bin', 'uv.exe'), join(home, '.cargo', 'bin', 'uv.exe')]
+      : [join(home, '.local', 'bin', 'uv'), join(home, '.cargo', 'bin', 'uv'), '/usr/local/bin/uv', '/opt/homebrew/bin/uv']
+    for (const candidate of candidates) {
+      if (existsSync(candidate) && await this.commandAvailable(candidate)) return candidate
+    }
+    return null
+  }
+
   private async pythonCommand(): Promise<string> {
     const candidates = [
       getPythonCommand(),
@@ -373,8 +449,14 @@ export class GSCoreManager {
 
   private async prepareLocalDependencies(): Promise<void> {
     const coreDir = getGSCoreCoreDir()
-    if (await this.commandAvailable('uv')) {
-      await run('uv', ['sync'], { cwd: coreDir, timeout: 20 * 60_000 })
+    const uv = await this.uvCommand()
+    if (uv && existsSync(join(coreDir, 'requirements.txt'))) {
+      const python = await this.localVenvPython()
+      await run(uv, ['pip', 'install', '--python', python, '-r', 'requirements.txt'], { cwd: coreDir, timeout: 30 * 60_000 })
+      return
+    }
+    if (uv) {
+      await run(uv, ['sync'], { cwd: coreDir, timeout: 20 * 60_000 })
       return
     }
     if (await this.commandAvailable('poetry')) {
@@ -431,7 +513,11 @@ export class GSCoreManager {
     }
     if (!this.localInstalled()) throw new Error('GsCore 尚未安装，请先执行安装')
     if (await this.serviceReachable()) {
-      throw new Error('GsCore 已在配置地址运行，当前进程不是本插件启动的；请勿重复启动，或先切换为 external 模式')
+      if (await this.adoptRunningProcess(true)) {
+        await this.waitForReady()
+        return
+      }
+      throw new Error('GsCore 已在配置地址运行，但无法确认该进程由本插件启动；请勿重复启动，或先切换为 external 模式')
     }
     this.ensureDirectories()
     this.writeBridgeConfig()
@@ -478,6 +564,30 @@ export class GSCoreManager {
       }
     })
     await this.waitForReady()
+    const listener = await this.listeningPID(getPort())
+    if (listener && child.pid && listener !== child.pid) {
+      logger.debug(`[GsCore] 端口 ${getPort()} 实际由 PID ${listener} 监听（启动根进程 PID ${child.pid}），停止时按进程树结束`)
+    }
+  }
+
+  private async stopProcessTree(pid: number): Promise<void> {
+    if (process.platform === 'win32') {
+      // GsCore 由 supervisor 父进程守护真正干活的服务进程，只结束根 PID 会留下
+      // 仍占着端口的子进程（表现为「停止/重启点了没反应」），所以按整棵子树结束。
+      try {
+        await run('taskkill', ['/PID', String(pid), '/T', '/F'], { timeout: 20_000 })
+      } catch {
+        // 进程可能已经退出，taskkill 会返回非零，无需处理。
+      }
+      return
+    }
+    try { process.kill(pid, 'SIGTERM') } catch { return }
+    const deadline = Date.now() + 10_000
+    while (Date.now() < deadline) {
+      try { process.kill(pid, 0) } catch { return }
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    try { process.kill(pid, 'SIGKILL') } catch { /* 进程可能已在等待期间退出。 */ }
   }
 
   private async stopLocalProcess(): Promise<void> {
@@ -489,15 +599,10 @@ export class GSCoreManager {
     this.localStopRequested = true
     const child = this.localProcess
     if (!child || child.killed) {
-      const pid = await this.managedLocalPID()
+      let pid = await this.managedLocalPID()
+      if (!pid) pid = await this.adoptRunningProcess(true)
       if (pid) {
-        try { process.kill(pid, 'SIGTERM') } catch { this.clearManagedProcess(pid); this.reachable = false; return }
-        const deadline = Date.now() + 10_000
-        while (Date.now() < deadline) {
-          try { process.kill(pid, 0) } catch { this.clearManagedProcess(pid); this.reachable = false; return }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-        try { process.kill(pid, 'SIGKILL') } catch { /* 进程可能已在等待期间退出。 */ }
+        await this.stopProcessTree(pid)
         this.clearManagedProcess(pid)
         this.reachable = false
         return
@@ -512,13 +617,14 @@ export class GSCoreManager {
       this.reachable = false
       return
     }
-    await new Promise<void>(resolve => {
-      let settled = false
-      const finish = () => { if (!settled) { settled = true; resolve() } }
-      const timer = setTimeout(() => { child.kill('SIGKILL'); finish() }, 10_000)
-      child.once('exit', () => { clearTimeout(timer); finish() })
-      child.kill('SIGTERM')
-    })
+    if (child.pid) {
+      const exited = new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, 15_000)
+        child.once('exit', () => { clearTimeout(timer); resolve() })
+      })
+      await this.stopProcessTree(child.pid)
+      await exited
+    }
     this.localProcess = null
     if (child.pid) this.clearManagedProcess(child.pid)
     this.reachable = false
@@ -568,7 +674,8 @@ export class GSCoreManager {
     const transportReady = await this.refresh(true)
     const adapterState = this.adapter.state
     const mode = getRuntimeMode()
-    const managedPID = mode === 'local' ? await this.managedLocalPID() : null
+    let managedPID = mode === 'local' ? await this.managedLocalPID() : null
+    if (mode === 'local' && !managedPID) managedPID = await this.adoptRunningProcess()
     // external 模式的“安装”由外部部署负责，服务暂时离线不代表未安装。
     const installed = mode === 'local' ? this.localInstalled() : mode === 'external' ? true : await this.containerExists()
     const processRunning = mode === 'local'
@@ -768,7 +875,8 @@ export class GSCoreManager {
     await this.withinTask('升级依赖', async () => {
       if (getRuntimeMode() === 'docker') throw new Error('Docker 模式请在镜像内更新依赖')
       if (!this.localInstalled()) throw new Error('未找到 GsCore 源码目录，无法升级依赖')
-      this.setTaskPhase('同步 Python 依赖（可能需要几分钟）')
+      const aligned = existsSync(join(getGSCoreCoreDir(), 'requirements.txt')) && Boolean(await this.uvCommand())
+      this.setTaskPhase(aligned ? '按 requirements.txt 对齐依赖版本（可能需要几分钟）' : '同步 Python 依赖（可能需要几分钟）')
       // 进程在跑时替换已加载的 .pyd/.dll 会失败（Windows 文件占用），提前把话说明白
       if (await this.serviceReachable()) {
         logger.warn('[GsCore] GsCore 正在运行，若升级提示文件被占用，请先停止 GsCore 后重试')
