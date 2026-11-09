@@ -116,6 +116,6 @@
     "test": "yarn build && node --test tests/*.test.mjs"
   },
   "type": "module",
-  "version": "0.0.6",
-  "gitHead": "8a7654f971feb7fb11ddbadf09aa4d6c6e885983"
+  "version": "0.0.7",
+  "gitHead": "8d222e17498062a76fd95967a27057b0f89f6ca4"
 }
