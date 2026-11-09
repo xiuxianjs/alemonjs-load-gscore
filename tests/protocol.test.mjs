@@ -53,3 +53,33 @@ test('flattens file media into the name|url form GsCore parses', () => {
     { type: 'file', data: '测试.zip|https://example.com/dir/%E6%B5%8B%E8%AF%95.zip?sign=abc' }
   ])
 })
+
+test('forwards at targets from the raw OneBot segments', () => {
+  const result = toMessageReceive({
+    MessageText: 'ww心面板',
+    value: {
+      message: [
+        { type: 'at', data: { qq: 'Dao Xiang' } },
+        { type: 'at', data: { qq: '123456' } },
+        { type: 'at', data: { qq: 'all' } },
+        { type: 'text', data: { text: 'ww心面板' } }
+      ]
+    }
+  }, 'AlemonJS')
+
+  assert.deepEqual(result.content, [
+    { type: 'text', data: 'ww心面板' },
+    { type: 'at', data: 'Dao Xiang' },
+    { type: 'at', data: '123456' }
+  ])
+})
+
+test('keeps media handling intact when no raw segments are present', () => {
+  const result = toMessageReceive({
+    MessageMedia: [{ Type: 'image', Url: 'https://example.com/a.png' }]
+  }, 'AlemonJS')
+
+  assert.deepEqual(result.content, [
+    { type: 'image', data: { type: 'url', content: 'https://example.com/a.png' } }
+  ])
+})
